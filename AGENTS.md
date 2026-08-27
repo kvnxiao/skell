@@ -58,6 +58,11 @@ script or spells the awk directory differently from the fish sources.
   runtime dependency to remove small amounts of duplication.
 - Load `zsh/completion.zsh` after `compinit`, and preserve zsh's completers,
   matcher lists, styles, prefixes, suffixes, and quoting rules.
+- Start skim from a PSReadLine key handler through
+  `System.Diagnostics.Process`, leaving stderr inherited, and hold
+  `[Console]::OutputEncoding` on UTF-8 until the redraw is done. A native
+  command called from a handler has every stream collected by the pipeline the
+  handler discards, and skim draws its interface on stderr.
 - Use GNU awk features deliberately; the project requires `gawk`.
 - Keep inline comments only for cross-shell format constraints, shell or OS
   behavior, ordering requirements, and wrong-looking compatibility choices.

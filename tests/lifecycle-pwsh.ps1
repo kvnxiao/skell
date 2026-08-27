@@ -77,6 +77,25 @@ $rendered = prompt
 Assert-True 'wrapped prompt sees a zero exit code' ($rendered -match 'exit=0')
 Assert-True 'wrapped prompt sees a true $?' ($rendered -match 'ok=True')
 
+# No suite drives a line editor, so the resolver is called on its own.
+$fake = Join-Path -Path $Sandbox -ChildPath 'fake-gawk.exe'
+Set-Content -LiteralPath $fake -Value 'not an executable' -NoNewline
+$priorOverride = $env:SKELL_GAWK
+try {
+    $env:SKELL_GAWK = $fake
+    Assert-Equal 'an existing SKELL_GAWK wins' $fake (Get-SkellGawkPath)
+
+    $env:SKELL_GAWK = Join-Path -Path $Sandbox -ChildPath 'absent-gawk.exe'
+    Assert-True 'a missing SKELL_GAWK resolves to nothing' ($null -eq (Get-SkellGawkPath))
+
+    $env:SKELL_GAWK = ''
+    $resolved = Get-SkellGawkPath
+    Assert-True 'an unset SKELL_GAWK resolves to a file or to nothing' `
+      ($null -eq $resolved -or [System.IO.File]::Exists($resolved))
+} finally {
+    $env:SKELL_GAWK = $priorOverride
+}
+
 Remove-Module Skell
 
 Assert-True 'store stayed inside the sandbox' `

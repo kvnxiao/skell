@@ -266,62 +266,147 @@ if (-not $script:SkellHooked) {
     }.GetNewClosure()
 }
 
+# PowerShell on Windows reads the native PATH, which includes neither MSYS2's
+# nor Git for Windows' usr\bin. Both ship gawk, so an absent gawk is looked for
+# beside the git on PATH before the binding gives up. SKELL_GAWK names the
+# executable outright.
+function Get-SkellGawkPath {
+    if ($env:SKELL_GAWK) {
+        if ([System.IO.File]::Exists($env:SKELL_GAWK)) { return $env:SKELL_GAWK }
+        return $null
+    }
+    # A gawk on two PATH entries resolves to two matches; the first is the one
+    # the call operator runs.
+    $onPath = @(Get-Command gawk -CommandType Application -ErrorAction Ignore)[0]
+    if ($onPath) { return $onPath.Source }
+    if (-not $IsWindows) { return $null }
+
+    $candidates = @()
+    $git = @(Get-Command git -CommandType Application -ErrorAction Ignore)[0]
+    if ($git) {
+        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+        $candidates += Join-Path -Path $gitRoot -ChildPath 'usr' -AdditionalChildPath 'bin', 'gawk.exe'
+    }
+    $candidates += 'C:\msys64\usr\bin\gawk.exe'
+    foreach ($candidate in $candidates) {
+        if ([System.IO.File]::Exists($candidate)) { return $candidate }
+    }
+    return $null
+}
+
+# skim draws its interface on stderr, and a native command called from a
+# PSReadLine key handler has every stream collected by the pipeline the handler
+# discards, which leaves the interface nowhere to appear. sk is started with
+# only stdin and stdout redirected so that it inherits the console for stderr.
+function Invoke-SkellSearch([string]$SkPath, [string[]]$SkArgs, [string[]]$Lines, [string]$GawkDir) {
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $SkPath
+    foreach ($arg in $SkArgs) { $psi.ArgumentList.Add($arg) }
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.StandardInputEncoding = [System.Text.UTF8Encoding]::new()
+    $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new()
+    # Only sk and the preview processes it spawns get gawk's directory on PATH.
+    $psi.Environment['PATH'] = "$GawkDir$([System.IO.Path]::PathSeparator)$($psi.Environment['PATH'])"
+
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    # The read is started before the write: a full stdout pipe would otherwise
+    # stall sk while skell is still feeding it candidates.
+    $reading = $proc.StandardOutput.ReadToEndAsync()
+    foreach ($item in $Lines) { $proc.StandardInput.WriteLine($item) }
+    $proc.StandardInput.Close()
+    $proc.WaitForExit()
+    return @(($reading.GetAwaiter().GetResult() -split "\r?\n") | Where-Object { $_.Length -gt 0 })
+}
+
 # gawk writes the ranked file itself: `>` would decode the native command's
-# stdout and re-encode every non-ASCII command in the store. PowerShell has no
-# input redirection, so the file is read back and piped, with the console and
-# pipeline encodings pinned to UTF-8 for the length of the call. The preview
-# runs gawk rather than a nested pwsh, whose startup cost is several times
-# skim's whole debounce budget.
+# stdout and re-encode every non-ASCII command in the store. The preview runs
+# gawk rather than a nested pwsh, whose startup cost is several times skim's
+# whole debounce budget.
 if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
     Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -BriefDescription 'Search skell history' -ScriptBlock {
-        $line = $null
-        $cursor = $null
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-
-        $store = [System.IO.FileInfo]::new($env:SKELL_HISTORY)
-        if (-not $store.Exists -or $store.Length -eq 0) { return }
-
-        $rank = Get-SkellRankPath
-
-        # gawk's -v processes escape sequences in the value, so a path spelled
-        # with backslashes loses every one that precedes a letter.
-        $rankArg = $rank.Replace('\', '/')
-        $awkDir = (Join-Path -Path $env:SKELL_ROOT -ChildPath 'share').Replace('\', '/')
-        # A ranked file left by an earlier keypress must not stand in for this
-        # one when gawk fails.
-        if ([System.IO.File]::Exists($rank)) { Remove-Item -LiteralPath $rank -Force }
-        & gawk -f "$awkDir/rank.awk" -v "out=$rankArg" $env:SKELL_HISTORY
-        if ($LASTEXITCODE -ne 0 -or -not [System.IO.File]::Exists($rank)) { return }
-        if (([System.IO.FileInfo]::new($rank)).Length -eq 0) { return }
-
-        $consoleEncoding = [Console]::OutputEncoding
-        $pipeEncoding = $OutputEncoding
+        # PSReadLine renders the prompt and the line through Console.Out, whose
+        # encoder replaces every glyph outside the console's code page with a
+        # question mark. skim writes the store's bytes to the console it
+        # inherits, which reads them by the same code page. Both hold for the
+        # length of the search, and the console keeps the code page the session
+        # started with.
+        $priorEncoding = [Console]::OutputEncoding
         try {
             [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-            $OutputEncoding = [System.Text.UTF8Encoding]::new()
-            $chosen = @([System.IO.File]::ReadAllLines($rank) | & sk `
-                    --height '60%' --min-height 15 --layout=reverse --border rounded `
-                    --prompt 'history > ' --info inline --ansi `
-                    --delimiter "`t" --with-nth '6..' `
-                    --tiebreak score,index `
-                    --query $line `
-                    --preview "gawk -f `"$awkDir/codec.awk`" -f `"$awkDir/preview-history.awk`" -v n={1} `"$rankArg`"" `
-                    --preview-window 'right:55%:wrap' `
-                    --bind 'enter:accept(edit),alt-enter:accept(run)')
-        } finally {
-            [Console]::OutputEncoding = $consoleEncoding
-            $OutputEncoding = $pipeEncoding
-        }
+            # PSReadLine reduces an exception raised by a key handler to
+            # a one-line dump pointing at $error, so a missing executable
+            # is reported before the call operator reaches for it.
+            $gawk = Get-SkellGawkPath
+            if (-not $gawk) {
+                Write-Warning 'skell: history search found no gawk; install one or set SKELL_GAWK to its path'
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+                return
+            }
+            $sk = @(Get-Command sk -CommandType Application -ErrorAction Ignore)[0]
+            if (-not $sk) {
+                Write-Warning 'skell: history search needs sk on PATH'
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+                return
+            }
 
-        if ($chosen.Count -lt 2) {
+            $line = $null
+            $cursor = $null
+            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+
+            $store = [System.IO.FileInfo]::new($env:SKELL_HISTORY)
+            if (-not $store.Exists -or $store.Length -eq 0) { return }
+
+            $rank = Get-SkellRankPath
+
+            # gawk's -v processes escape sequences in the value, so a path
+            # spelled with backslashes loses every one that precedes a letter.
+            $rankArg = $rank.Replace('\', '/')
+            $awkDir = (Join-Path -Path $env:SKELL_ROOT -ChildPath 'share').Replace('\', '/')
+            # A ranked file left by an earlier keypress must not stand in
+            # for this one when gawk fails.
+            if ([System.IO.File]::Exists($rank)) { Remove-Item -LiteralPath $rank -Force }
+            try { & $gawk -f "$awkDir/rank.awk" -v "out=$rankArg" $env:SKELL_HISTORY } catch {
+                Write-Warning "skell: $gawk did not run: $($_.Exception.Message)"
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+                return
+            }
+            if ($LASTEXITCODE -ne 0 -or -not [System.IO.File]::Exists($rank)) { return }
+            if (([System.IO.FileInfo]::new($rank)).Length -eq 0) { return }
+
+            # cmd drops the first and last quote of a command string that opens
+            # and closes with one, which would cut a gawk path holding a space.
+            # The preview names the executable alone and reaches it through the
+            # PATH that Invoke-SkellSearch gives sk.
+            $gawkName = [System.IO.Path]::GetFileName($gawk)
+            $preview = "$gawkName -f `"$awkDir/codec.awk`" -f `"$awkDir/preview-history.awk`" -v n={1} `"$rankArg`""
+
+            $skArgs = @(
+                '--height', '60%', '--min-height', '15', '--layout=reverse', '--border', 'rounded',
+                '--prompt', 'history > ', '--info', 'inline', '--ansi',
+                '--delimiter', "`t", '--with-nth', '6..',
+                '--tiebreak', 'score,index',
+                '--query', $line,
+                '--preview', $preview,
+                '--preview-window', 'right:55%:wrap',
+                '--bind', 'enter:accept(edit),alt-enter:accept(run)')
+
+            $chosen = Invoke-SkellSearch -SkPath $sk.Source -SkArgs $skArgs `
+                -Lines ([System.IO.File]::ReadAllLines($rank)) -GawkDir (Split-Path -Parent $gawk)
+
+            if ($chosen.Count -lt 2) {
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+                return
+            }
+            $fields = $chosen[1].Split("`t", 6)
+            [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, (Convert-SkellEscape $fields[5]))
             [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-            return
-        }
-        $fields = $chosen[1].Split("`t", 6)
-        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, (Convert-SkellEscape $fields[5]))
-        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-        if ($chosen[0] -eq 'run') {
-            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+            if ($chosen[0] -eq 'run') {
+                [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+            }
+        } finally {
+            [Console]::OutputEncoding = $priorEncoding
         }
     }
 }
@@ -341,4 +426,4 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
 }
 
 Export-ModuleMember -Function Convert-SkellEscape, Get-SkellEscapedField,
-Get-SkellFittedRecord, Write-SkellRecord
+Get-SkellFittedRecord, Get-SkellGawkPath, Write-SkellRecord

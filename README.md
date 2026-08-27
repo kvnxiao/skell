@@ -28,7 +28,13 @@ written against; the parameter flags and hooks it uses are much older.
   `accept(edit)` and `accept(run)` binds are the current form of a bind skim
   also accepts in a deprecated spelling.
 - `gawk` for ranking and previews (`mktime`, `systime`, and `PROCINFO` are GNU
-  extensions)
+  extensions). Windows ships no awk, and neither MSYS2 nor Git for Windows puts
+  its `usr\bin` on the native `PATH`, so the PowerShell module looks for
+  `gawk.exe` beside the `git` on `PATH` and then in `C:\msys64\usr\bin`. Git for
+  Windows ships gawk at the first of those. `scoop install gawk` installs a
+  native build on the `PATH` instead. The module reads `SKELL_GAWK` as the path
+  to a gawk executable ahead of both; the other shells resolve `gawk` through
+  the `PATH` alone.
 - [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
   preview; without lsd the preview uses `ls`
 
@@ -76,6 +82,9 @@ Import-Module "$HOME\github\skell\powershell\Skell.psm1"
 
 `Remove-Module Skell` puts the prompt and the PSReadLine history handler back as
 it found them.
+
+`sk` is resolved through the `PATH` the session runs with. When either `sk` or
+`gawk` is missing, `Ctrl+R` warns and leaves the line untouched.
 
 ## History search
 
