@@ -1,0 +1,44 @@
+# Codec test vectors: name, raw field, encoded field.
+#
+# Both fields use %XX hex escapes for every byte below 0x20, for 0x5C and 0x7F,
+# and for %25 itself; nothing else is interpreted, so non-ASCII text appears
+# unescaped. Keeping every escape below 0x80 lets a reader build the bytes from
+# code points without knowing the file's encoding.
+#
+# NUL is outside the store contract, so no vector holds one: no supported line
+# editor can produce it and it terminates the C strings gawk builds. Every
+# other byte below 0x20 and 0x7F must survive a round trip unchanged.
+plain	git status	git status
+backslash	echo %5C	echo %5C%5C
+two-backslash	echo %5C%5C	echo %5C%5C%5C%5C
+tab	echo a%09b	echo a%5Ctb
+newline	echo a%0Ab	echo a%5Cnb
+cr	echo a%0Db	echo a%5Crb
+crlf	echo a%0D%0Ab	echo a%5Cr%5Cnb
+backslash-n	echo %5Cn	echo %5C%5Cn
+backslash-t	echo %5Ct	echo %5C%5Ct
+backslash-r	echo %5Cr	echo %5C%5Cr
+backslash-plus	echo %5C+	echo %5C%5C+
+two-backslash-n	echo %5C%5Cn	echo %5C%5C%5C%5Cn
+soh	echo %01	echo %01
+stx	echo %02	echo %02
+unit-sep	echo %1F	echo %1F
+del	echo %7F	echo %7F
+vertical-tab	echo a%0Bb	echo a%0Bb
+form-feed	echo a%0Cb	echo a%0Cb
+escape-byte	echo a%1Bb	echo a%1Bb
+percent	echo 100%25 done	echo 100%25 done
+unicode	echo héllo 世界 🙂	echo héllo 世界 🙂
+trailing-bs	echo foo%5C	echo foo%5C%5C
+mixed	printf 'a%5Ctb%5Cn' >f%5C	printf 'a%5C%5Ctb%5C%5Cn' >f%5C%5C
+only-backslashes	echo %5C%5C%5C%5C	echo %5C%5C%5C%5C%5C%5C%5C%5C
+empty		
+soh-with-escape	echo %01%5Cn%02	echo %01%5C%5Cn%02
+all-controls	echo %01%02%03%04%05%06%07%08%0B%0C%0E%0F%10%11%12%13%14%15%16%17%18%19%1A%1B%1C%1D%1E%1F%7F	echo %01%02%03%04%05%06%07%08%0B%0C%0E%0F%10%11%12%13%14%15%16%17%18%19%1A%1B%1C%1D%1E%1F%7F
+trailing-newline	echo a%0A	echo a%5Cn
+trailing-tab	echo a%09	echo a%5Ct
+leading-dash	-n foo	-n foo
+dash-backslash	-e %5C	-e %5C%5C
+astral	echo 🙂	echo 🙂
+astral-backslash	echo 🙂%5C	echo 🙂%5C%5C
+nbsp	echo a b	echo a b

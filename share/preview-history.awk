@@ -1,0 +1,31 @@
+# Render one ranked record for skim's preview pane. Pass -v n=<id>, where id is
+# the first field of the line skim is showing. Load share/codec.awk first.
+#
+# skim substitutes its placeholders raw, and on Windows it runs the preview
+# through cmd.exe, so the only value crossing that boundary is the numeric id.
+# Everything printed here is read back out of the rank file.
+
+function ago(seconds) {
+  if (seconds < 60) return "just now"
+  if (seconds < 3600) return int(seconds / 60) " min ago"
+  if (seconds < 86400) return int(seconds / 3600) " h ago"
+  if (seconds < 2592000) return int(seconds / 86400) " d ago"
+  return int(seconds / 2592000) " mo ago"
+}
+
+BEGIN { FS = "\t"; dim = "\033[2m"; accent = "\033[36m"; bad = "\033[31m"; off = "\033[0m" }
+
+$1 != n { next }
+
+{
+  cmd = $6
+  for (f = 7; f <= NF; f++) cmd = cmd FS $f
+
+  status = ($4 == "-1") ? dim "exit unknown" off : \
+           (($4 == "0") ? dim "exit " off "0" : bad "exit " $4 off)
+  printf("%s%s%s  %s·%s  %s  %s·%s  %s\n", accent, strftime("%Y-%m-%d %H:%M", $2), off,
+         dim, off, ago(systime() - $2), dim, off, status)
+  printf("%sruns%s %d   %sin%s %s\n\n", dim, off, $3, dim, off, skell_unescape($5))
+  print skell_unescape(cmd)
+  exit
+}

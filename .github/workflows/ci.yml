@@ -1,0 +1,75 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The POSIX shells run on all three platforms. The Windows runner image
+  # supplies only bash and PowerShell, so tests/run-all.sh skips zsh and fish
+  # there and says so; the PowerShell suites cover the Windows-specific store
+  # behavior.
+  shells:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shells and gawk on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gawk zsh fish shellcheck
+
+      - name: Install shells and gawk on macOS
+        if: runner.os == 'macOS'
+        run: brew install gawk zsh fish shellcheck
+
+      - name: Install gawk on Windows
+        if: runner.os == 'Windows'
+        run: choco install gawk --no-progress -y
+
+      # An `&&` chain would make a missing shell the step's exit status, so each
+      # optional check sits inside an `if`.
+      - name: Check syntax
+        run: |
+          set -e
+          bash -n bash/*.bash share/*.sh tests/*.sh tests/lib/*.sh
+          for script in share/*.awk; do gawk -f "$script" </dev/null >/dev/null; done
+          if command -v zsh >/dev/null; then
+            zsh -n zsh/*.zsh tests/lib/*.zsh
+          fi
+          if command -v fish >/dev/null; then
+            fish -n fish/conf.d/*.fish fish/functions/*.fish tests/lib/*.fish
+            fish_indent --check fish/conf.d/*.fish fish/functions/*.fish tests/lib/*.fish
+          fi
+
+      - name: Lint shell scripts
+        if: runner.os != 'Windows'
+        run: shellcheck --severity=style bash/*.bash share/*.sh tests/*.sh tests/lib/*.sh
+
+      - name: Run the suites
+        run: bash tests/run-all.sh
+
+  analyzer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          $findings = @(Invoke-ScriptAnalyzer -Path powershell -Recurse `
+              -Settings PSScriptAnalyzerSettings.psd1 -Severity Error,Warning,Information)
+          $findings | Format-Table -Wrap
+          if (@($findings | Where-Object Severity -In 'Error', 'Warning').Count) { exit 1 }

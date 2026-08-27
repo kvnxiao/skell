@@ -1,0 +1,53 @@
+name: fish-releases
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fish/**'
+      - 'share/*.awk'
+      - 'share/build-fish-plugin.sh'
+      - 'LICENSE'
+      - '.github/workflows/fish-releases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Concurrent runs would race to force-push the branch.
+concurrency:
+  group: fish-releases
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install fish and gawk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish gawk
+
+      # The ci workflow runs on the same push without blocking this one, so
+      # the plugin suite runs again in this job.
+      - name: Check the built plugin
+        run: bash tests/plugin-fish.sh
+
+      - name: Assemble the plugin
+        run: bash share/build-fish-plugin.sh "$RUNNER_TEMP/fish-releases"
+
+      # fisher fetches a tarball of the ref rather than cloning and does not
+      # read history, so each run rebuilds the branch as a single commit.
+      - name: Publish the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}/fish-releases
+        run: |
+          git init -q
+          git add -A
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Build the fish plugin from $GITHUB_SHA"
+          git push -q -f \
+            "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY" HEAD:fish-releases
