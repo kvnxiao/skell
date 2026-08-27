@@ -33,7 +33,7 @@ jobs:
 
       - name: Install shells and gawk on macOS
         if: runner.os == 'macOS'
-        run: brew install gawk zsh fish shellcheck
+        run: brew install bash gawk zsh fish shellcheck
 
       - name: Install gawk on Windows
         if: runner.os == 'Windows'

@@ -95,13 +95,15 @@ if command -v pwsh >/dev/null 2>&1; then
         \$acl = Get-Acl \$env:SKELL_HISTORY
         'acl:{0}/{1}' -f @(\$acl.Access).Count, @(\$acl.Access | Where-Object IsInherited).Count
       } else {
-        'mode:{0}/{1}' -f (Get-Item \$env:SKELL_DATA_DIR).UnixFileMode, (Get-Item \$env:SKELL_HISTORY).UnixFileMode
+        # UnixFileMode is a flags enum, and its name order is not contract.
+        \$octal = { param(\$p) [Convert]::ToString([int](Get-Item \$p).UnixFileMode, 8) }
+        'mode:{0}/{1}' -f (& \$octal \$env:SKELL_DATA_DIR), (& \$octal \$env:SKELL_HISTORY)
       }
     " 2>/dev/null | tr -d '\r')
   case $result in
     'acl:1/0')
       skell_ok 'pwsh store carries one uninherited entry' ;;
-    'mode:UserRead, UserWrite, UserExecute/UserRead, UserWrite')
+    'mode:700/600')
       skell_ok 'pwsh store is 0700 over 0600' ;;
     acl:*)
       skell_not_ok "pwsh store carries one uninherited entry (got $result)" ;;

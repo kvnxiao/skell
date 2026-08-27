@@ -33,23 +33,31 @@ SKELL_HISTORY=$bash_store
 . "\$SKELL_ROOT/bash/skell.bash"
 RCEOF
 
-# HISTFILE is isolated so the shell starts with an empty history list.
-printf '%s\n' \
-  'true' \
-  ' echo excluded' \
-  '(exit 7)' \
-  'printf %s hello' \
-  | HISTFILE="$SKELL_SANDBOX/bash.hist" \
-    bash --noprofile --rcfile "$SKELL_SANDBOX/rc.bash" -i >/dev/null 2>&1
+# skell needs bash 5.0 for EPOCHSECONDS; macOS ships 3.2.
+bash_major=$(bash -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null)
+if [ "${bash_major:-0}" -lt 5 ]; then
+  printf '%s: bash %s predates EPOCHSECONDS; bash assertions skipped\n' \
+    "$skell_name" "$(bash -c 'echo "$BASH_VERSION"' 2>/dev/null)"
+else
+  # HISTFILE is isolated so the shell starts with an empty history list.
+  printf '%s\n' \
+    'true' \
+    ' echo excluded' \
+    '(exit 7)' \
+    'printf %s hello' \
+    | HISTFILE="$SKELL_SANDBOX/bash.hist" \
+      bash --noprofile --rcfile "$SKELL_SANDBOX/rc.bash" -i >/dev/null 2>&1
 
-assert_store 'bash' "$bash_store" 3
-skell_eq 'bash records the shell name' bash "$(col 1 4 "$bash_store")"
-skell_eq 'bash records the first command' 'true' "$(col 1 5 "$bash_store")"
-skell_eq 'bash preserves a failing exit status' 7 "$(col 2 3 "$bash_store")"
-skell_eq 'bash records the command after the failure' 'printf %s hello' "$(col 3 5 "$bash_store")"
-skell_false 'bash excludes the leading-space command' grep -q 'excluded' "$bash_store"
-skell_eq 'bash records an absolute directory' 1 \
-  "$(gawk -F'\t' -e 'NR == 1 && $2 ~ /^(\/|[A-Za-z]:)/ { print 1 }' "$bash_store")"
+  assert_store 'bash' "$bash_store" 3
+  skell_eq 'bash records the shell name' bash "$(col 1 4 "$bash_store")"
+  skell_eq 'bash records the first command' 'true' "$(col 1 5 "$bash_store")"
+  skell_eq 'bash preserves a failing exit status' 7 "$(col 2 3 "$bash_store")"
+  skell_eq 'bash records the command after the failure' 'printf %s hello' \
+    "$(col 3 5 "$bash_store")"
+  skell_false 'bash excludes the leading-space command' grep -q 'excluded' "$bash_store"
+  skell_eq 'bash records an absolute directory' 1 \
+    "$(gawk -F'\t' -e 'NR == 1 && $2 ~ /^(\/|[A-Za-z]:)/ { print 1 }' "$bash_store")"
+fi
 
 # ---------------------------------------------------------------- zsh
 
