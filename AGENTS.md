@@ -23,14 +23,14 @@ and the README in the same change.
 
 ## fish plugin branch
 
-fisher is the only supported fish install. It copies only a plugin's root
-`conf.d/`, `functions/`, `completions/`, and `themes/`, so the build makes
-`fish/` the root of `fish-releases` and puts `share/*.awk` under
-`functions/skell-share`. `_skell_history` appends `skell-share` to
-`(status dirname)`, which fish reports as the directory it autoloaded the
-function from. Before `.github/workflows/fish-releases.yml` force-pushes the
-branch, it runs `tests/plugin-fish.sh`, which fails when the build omits an awk
-script or spells the awk directory differently from the fish sources.
+fisher is the only supported fish installer. It copies only a plugin's root
+`conf.d/`, `functions/`, `completions/`, and `themes/`. Build `fish/` as the
+root of `fish-releases` and put `share/*.awk` under `functions/skell-share`.
+`_skell_history` appends `skell-share` to `(status dirname)`. Fish reports
+`(status dirname)` as the directory from which it autoloaded the function.
+Before `.github/workflows/fish-releases.yml` force-pushes the branch, it runs
+`tests/plugin-fish.sh`. The test fails when the build omits an awk script or
+uses an awk directory name that differs from the fish sources.
 
 ## Store contract
 
@@ -51,22 +51,27 @@ script or spells the awk directory differently from the fish sources.
 ## Implementation rules
 
 - Keep recording hooks fork-free. No external utility runs on the prompt path.
-  A command substitution around a builtin or a shell function is fine where the
-  shell evaluates it in-process, as fish does; one around an external command is
-  not.
+  Allow command substitutions around builtins or shell functions when the shell
+  evaluates them in-process. Do not use command substitutions around external
+  commands.
 - Keep shell-specific implementations direct. Do not introduce a shared
   runtime dependency to remove small amounts of duplication.
 - Load `zsh/completion.zsh` after `compinit`, and preserve zsh's completers,
   matcher lists, styles, prefixes, suffixes, and quoting rules.
+- Start skim from a PSReadLine key handler through
+  `System.Diagnostics.Process`. Inherit stderr and keep
+  `[Console]::OutputEncoding` set to UTF-8 until the redraw completes. When a
+  key handler invokes a native command, the handler's pipeline collects and
+  discards every stream. Skim draws its interface on stderr.
 - Use GNU awk features deliberately; the project requires `gawk`.
 - Keep inline comments only for cross-shell format constraints, shell or OS
   behavior, ordering requirements, and wrong-looking compatibility choices.
 
 ## Verification
 
-Run the applicable commands from the repository root. Each command selects by
-directory and extension, so adding a file under a covered directory does not
-require editing this list:
+Run the applicable commands from the repository root. The command patterns
+select files by directory and extension. Adding a file under a covered directory
+does not require editing this list:
 
 ```sh
 bash -n bash/*.bash share/*.sh tests/*.sh tests/lib/*.sh
@@ -80,65 +85,63 @@ bash tests/run-all.sh
 ```
 
 `tests/run-all.sh` covers the codec in all five implementations, the record
-fitter's boundaries, what each recording hook writes, what fish loads from the
-built plugin, the atuin importer's failure paths, store permissions, and the
-PowerShell module's lifecycle. It skips a suite whose shell the machine lacks
-and names what it skipped.
+fitter's boundaries, each recording hook's output, the files fish loads from
+the built plugin, the atuin importer's failure paths, store permissions, and the
+PowerShell module's lifecycle. It skips suites for unavailable shells and names
+each skipped suite.
 
-No suite drives a real line editor. bash records under `bash -i`, so its
-records come from readline; zsh and fish are called at the hook boundary with
-the arguments their editors pass, because no pty is available on every
-supported platform. PowerShell's `Get-History` is empty outside an interactive
-session, so `Write-SkellRecord` cannot be driven; the suite covers the store
-opener and the fitter instead. Exercise a key binding, a widget, or
-PowerShell's own recording by hand.
+No suite drives a real line editor. Bash records under `bash -i`; zsh and fish
+are called at the hook boundary with the arguments their editors pass because
+the test environment cannot provide a pty on every supported platform.
+PowerShell's `Get-History` is empty outside an interactive session, so
+`Write-SkellRecord` cannot be driven. The suite covers the store opener and
+fitter instead. Exercise a key binding, a widget, or PowerShell's own recording
+by hand.
 
 A change to the escape grammar or the record budget belongs in
-`tests/lib/vectors.tsv`. Every implementation is measured against it, so a
-writer that diverges fails rather than silently storing something another shell
-cannot read back.
+`tests/lib/vectors.tsv`. Every implementation is measured against this vector
+set. A divergent writer fails instead of storing a record another shell cannot
+decode.
 
 ## Ad hoc shell scripts on Windows
 
-A native Windows binary ignores the MSYS signal that `timeout` sends, so
-`timeout N script -q -c '…'` bounds nothing that `script` starts. Driving `sk`
-or an interactive shell through a pty that way leaves the wrapper and its
-children spinning on CPU long after the timeout expires, and they accumulate
-across a session. End them with `Stop-Process -Id <pid> -Force` from
-PowerShell; matching on process name alone would also kill the interactive
-shells the user is working in.
+A native Windows binary ignores the MSYS signal that `timeout` sends.
+`timeout N script -q -c '…'` therefore does not bound `script` or the processes
+it starts. Driving `sk` or an interactive shell through a pty leaves the
+wrapper and its children running after the timeout expires, and they accumulate
+across a session. End them with `Stop-Process -Id <pid> -Force` from PowerShell;
+matching on process name alone would also kill the interactive shells the user
+is working in.
 
-MSYS2's zsh and the Git-for-Windows bash that an agent runs are separate Cygwin
-runtimes, so `env VAR=x zsh …` reaches zsh with `VAR` unset. A harness that
-sets `ZDOTDIR` this way silently tests the real config instead of the fixture.
-Write test configuration to a file and source it as the first line of the
-session.
+MSYS2's zsh and Git-for-Windows Bash run in separate Cygwin runtimes.
+`env VAR=x zsh …` reaches zsh with `VAR` unset. A harness that prefixes zsh
+with `env VAR=x` tests the real configuration instead of the fixture. Write
+test configuration to a file and source it as the session's first command.
 
-The two runtimes also resolve `/tmp` differently. Git-for-Windows mounts it
-`usertemp` at `%LOCALAPPDATA%\Temp`, while MSYS2 roots at `C:/msys64` and has
-no `/tmp` entry, so the same POSIX path names two different directories: MSYS2
-zsh and fish report `No such file or directory` for a path `ls` resolves in
-bash. `TMP` and `TEMP` do not govern the mapping; the mount in `/etc/fstab`
-does.
+The two runtimes resolve `/tmp` differently. Git-for-Windows mounts `/tmp` as
+`usertemp` at `%LOCALAPPDATA%\Temp`; MSYS2 roots at `C:/msys64` and has no
+`/tmp` entry. The same POSIX path therefore identifies different directories in
+the two runtimes. MSYS2 zsh and fish report `No such file or directory` for a
+path that Git Bash's `ls` resolves. `TMP` and `TEMP` do not govern the mapping;
+the mount in `/etc/fstab` does.
 
-The mixed `C:/...` form that `cygpath -m` prints is not a way around the split.
-MSYS2 fish stats a mixed path but cannot redirect to one, and fails with `Path
-does not exist` on a directory it will happily `test -d`. Instead, put the
-fixture where every runtime addresses it natively: `C:/msys64/tmp` is `/tmp` to
-MSYS2 zsh and fish, `/c/msys64/tmp` to the agent's bash, and `C:/msys64/tmp` to
-PowerShell. All four read and write it.
+A mixed `C:/...` path from `cygpath -m` does not work for MSYS2 redirection.
+MSYS2 fish can stat the path but cannot redirect to it, and reports `Path does
+not exist` for a directory that `test -d` accepts. Use a native path for the
+fixture: `C:/msys64/tmp` is `/tmp` to MSYS2 zsh and fish,
+`/c/msys64/tmp` to the agent's Bash, and `C:/msys64/tmp` to PowerShell. All four
+read and write it.
 
-`mount` and the other utilities resolve per runtime as well, so
-`zsh -c 'mount'` run from an agent bash reports bash's table rather than
-MSYS2's. Read a runtime's own configuration only from a shell that runtime
-started.
+`mount` and the other utilities resolve paths using the invoking runtime.
+Running `zsh -c 'mount'` from agent Bash reports Bash's mount table, not
+MSYS2's. Read runtime-specific configuration from a shell started by that
+runtime.
 
-An MSYS2 shell that an agent starts also inherits the agent's `PATH`, which puts
-Git-for-Windows ahead of `/usr/bin`. `mkdir -p /tmp/x` then runs
-Git-for-Windows' `mkdir` against Git-for-Windows' `/tmp`, so the directory
-appears somewhere the MSYS2 shell cannot see and the shell reports it missing.
-Prepend `/usr/bin:/bin` in the fixture that a zsh or fish session sources
-before anything external runs.
+An MSYS2 shell started by an agent inherits the agent's `PATH`. Git-for-Windows
+precedes `/usr/bin` in that path. `mkdir -p /tmp/x` therefore invokes
+Git-for-Windows' `mkdir` against Git-for-Windows' `/tmp`; MSYS2 cannot see the
+resulting directory. Prepend `/usr/bin:/bin` in the fixture that a zsh or fish
+session sources before anything external runs.
 
 A Git-for-Windows clone sets `core.filemode` to false, so git does not record
 a new script's executable bit. Invoke a repository script through `bash`.
