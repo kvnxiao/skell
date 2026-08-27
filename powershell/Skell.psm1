@@ -13,9 +13,9 @@ if (-not $env:SKELL_HISTORY) {
     $env:SKELL_HISTORY = Join-Path -Path $env:SKELL_DATA_DIR -ChildPath 'history.tsv'
 }
 
-# The store holds every command the user runs. On Unix the mode is set
-# directly; on Windows the inherited ACL is replaced by one entry for the
-# current account, since a profile directory can inherit wider rights.
+# The history store contains recorded commands. Unix mode bits are set directly;
+# Windows replaces inherited ACL entries with one entry for the current account
+# because profile directories can inherit broader rights.
 function Set-SkellPrivateAcl {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$Path)
@@ -78,10 +78,10 @@ if (-not [System.IO.File]::Exists($env:SKELL_HISTORY)) {
     }
 }
 
-# An MSYS2 flock and a Windows named mutex cannot see each other, so no lock
-# spans these shells. FILE_APPEND_DATA reaches the same kernel atomic append
-# that Cygwin's O_APPEND compiles to, which is the only coordination between
-# PowerShell and the POSIX halves.
+# A lock acquired with MSYS2's `flock` and a Windows named mutex do not
+# coordinate, so no lock spans these shells. FILE_APPEND_DATA reaches the same
+# kernel atomic append as Cygwin's O_APPEND, which is the only coordination
+# between PowerShell and the POSIX halves.
 # AppendAllText, Add-Content, and Out-File -Append all open GENERIC_WRITE
 # without FILE_APPEND_DATA and emulate the append as GetLength() plus a
 # positional write, which races another shell mid-command. They also open
@@ -104,10 +104,10 @@ function Open-SkellStore {
         [System.IO.FileShare]::ReadWrite)
 }
 
-# The ranked file is a plaintext dump of the whole history, so it stays in
+# The ranked file is a plaintext dump of the whole history, so keep it in
 # skell's own directory rather than a temp directory shared with every other
-# user of the machine. MSYS2 and Windows number processes separately, so the
-# name carries the shell as well as the id.
+# user of the machine. MSYS2 and Windows number processes separately, so its
+# name includes the shell and process ID.
 function Get-SkellRankPath {
     return Join-Path -Path $env:SKELL_DATA_DIR -ChildPath "rank-pwsh-$PID.tsv"
 }
@@ -128,14 +128,14 @@ function Convert-SkellEscape([string]$Text) {
     return $parts -join '\'
 }
 
-# Concurrent appenders interleave without tearing up to 1024 bytes on NTFS
-# through the Cygwin and MSYS2 runtimes, which is where skell is tested. A
+# Concurrent appends do not tear records up to 1024 bytes on NTFS through the
+# Cygwin and MSYS2 runtimes, which are covered by skell's tests. A
 # record holding any non-ASCII code point is capped at a quarter of the budget,
 # since four bytes is the widest UTF-8 encoding and a byte count would need a
 # second pass. .NET counts UTF-16 units, as bash and zsh do under Cygwin's
-# 16-bit wchar_t, while gawk and fish count code points; either count stays
-# inside 1000 bytes, so a command outside the BMP is cut at a different point
-# depending on which shell recorded it.
+# 16-bit wchar_t, while gawk and fish count code points. Both counts keep the
+# record inside 1000 bytes, so a command outside the BMP is cut at a different
+# point depending on which shell recorded it.
 function Get-SkellFittedRecord([string]$Head, [string]$Command) {
     $record = "$Head`t$Command"
     $limit = if ([System.Text.Encoding]::UTF8.GetByteCount($record) -eq $record.Length) { 1000 } else { 250 }
@@ -147,22 +147,21 @@ function Get-SkellFittedRecord([string]$Head, [string]$Command) {
         $Head = "$($f[0])`tunknown`t$($f[2])`t$($f[3])"
         $record = "$Head`t$Command"
         $limit = if ([System.Text.Encoding]::UTF8.GetByteCount($record) -eq $record.Length) { 1000 } else { 250 }
-        # Dropping the directory can be enough on its own, and a record that
-        # now fits is whole: marking it elided would claim a cut that never
-        # happened.
+        # Replacing the directory can make the record fit without cutting the
+        # command. Return it without `\+`; that marker means the command was cut.
         if ($record.Length -le $limit) { return $record }
         $keep = $limit - $Head.Length - 3
         if ($keep -lt 0) { $keep = 0 }
     }
     $cmd = $Command.Substring(0, $keep)
-    # .NET counts UTF-16 units, so a cut can land between the halves of a
-    # surrogate pair. Encoding a lone surrogate yields U+FFFD, which no decoder
-    # can undo, so the orphaned half goes.
+    # .NET counts UTF-16 units, so a cut can split a surrogate pair. Encoding a
+    # lone surrogate yields U+FFFD, which no decoder can reverse; drop the
+    # orphaned half.
     if ($cmd.Length -gt 0 -and [char]::IsHighSurrogate($cmd[$cmd.Length - 1])) {
         $cmd = $cmd.Substring(0, $cmd.Length - 1)
     }
-    # An even run of trailing backslashes is whole escape pairs; an odd run
-    # means the cut landed inside one, so the last backslash goes.
+    # Keep complete escape pairs: an odd trailing backslash run means the cut
+    # landed inside one, so drop its last backslash.
     $run = 0
     for ($i = $cmd.Length - 1; $i -ge 0 -and $cmd[$i] -eq '\'; $i--) { $run++ }
     if ($run % 2) { $cmd = $cmd.Substring(0, $cmd.Length - 1) }
@@ -177,10 +176,9 @@ function Write-SkellRecord($Ok, $LastExit) {
     $raw = $entry.CommandLine
     if ([string]::IsNullOrEmpty($raw) -or $raw.StartsWith(' ')) { return }
 
-    # A native command sets LASTEXITCODE; a PowerShell error leaves whatever
-    # the last native command put there, so LASTEXITCODE alone would record a
-    # stale code. The newest error record names the line it was raised from,
-    # and matching that line against the command just run tells the two apart.
+    # A PowerShell error leaves the previous native command's $LASTEXITCODE in
+    # place. Match the newest error record's invocation line to the command
+    # before recording status 1.
     $code = 0
     if (-not $Ok) {
         $code = if ($LastExit) { $LastExit } else { 1 }
@@ -192,12 +190,12 @@ function Write-SkellRecord($Ok, $LastExit) {
 
     $cmd = Get-SkellEscapedField $raw
 
-    # Only the FileSystem provider has a path that the other shells could
-    # match; a registry or certificate location records as unknown.
+    # Only the FileSystem provider supplies a path that the other shells can
+    # match; record registry or certificate locations as unknown.
     $cwd = 'unknown'
     if ($PWD.Provider.Name -eq 'FileSystem') {
-        # The POSIX halves write an MSYS2 path, so the drive-letter form is
-        # folded to match.
+        # POSIX writers use an MSYS2 path, so normalize a drive-letter path to
+        # match.
         $cwd = $PWD.ProviderPath.Replace('\', '/')
         if ($cwd.Length -ge 2 -and $cwd[1] -eq ':') {
             $cwd = '/' + [char]::ToLowerInvariant($cwd[0]) + $cwd.Substring(2)
@@ -219,10 +217,9 @@ function Write-SkellRecord($Ok, $LastExit) {
     }
 }
 
-# PSReadLine allows one AddToHistoryHandler, so the handler already in place is
-# captured and consulted first: a command it rejects stays out of PSReadLine's
-# history. Write-SkellRecord checks the leading space again, so replacing this
-# handler later cannot put the command in the store.
+# PSReadLine accepts one AddToHistoryHandler, so preserve and consult the
+# existing handler for commands without a leading space. Write-SkellRecord
+# repeats the leading-space check after history storage.
 if (Get-Command Set-PSReadLineOption -ErrorAction Ignore) {
     $script:SkellPriorHistoryHandler = (Get-PSReadLineOption).AddToHistoryHandler
     Set-PSReadLineOption -AddToHistoryHandler {
@@ -256,9 +253,8 @@ if (-not $script:SkellHooked) {
 
         Write-SkellRecord $ok $lastExit
 
-        # The LASTEXITCODE assignment leaves $? true on its own, so only the
-        # false case needs an action, and it has to run last before the inner
-        # prompt reads $?.
+        # Assigning $LASTEXITCODE sets $? to true. Restore a false captured
+        # status after the assignment and before the inner prompt runs.
         $global:LASTEXITCODE = $lastExit
         if (-not $ok) { Write-Error '' -ErrorAction Ignore }
 
@@ -266,17 +262,16 @@ if (-not $script:SkellHooked) {
     }.GetNewClosure()
 }
 
-# PowerShell on Windows reads the native PATH, which includes neither MSYS2's
-# nor Git for Windows' usr\bin. Both ship gawk, so an absent gawk is looked for
-# beside the git on PATH before the binding gives up. SKELL_GAWK names the
-# executable outright.
+# Windows PowerShell uses the native PATH, which excludes MSYS2's and Git for
+# Windows' usr\bin. If SKELL_GAWK is set, use only that path; otherwise check
+# PATH, git's usr\bin, and C:\msys64\usr\bin in that order.
 function Get-SkellGawkPath {
     if ($env:SKELL_GAWK) {
         if ([System.IO.File]::Exists($env:SKELL_GAWK)) { return $env:SKELL_GAWK }
         return $null
     }
-    # A gawk on two PATH entries resolves to two matches; the first is the one
-    # the call operator runs.
+    # Select the first PATH match because the caller invokes the returned path
+    # directly.
     $onPath = @(Get-Command gawk -CommandType Application -ErrorAction Ignore)[0]
     if ($onPath) { return $onPath.Source }
     if (-not $IsWindows) { return $null }
@@ -294,10 +289,9 @@ function Get-SkellGawkPath {
     return $null
 }
 
-# skim draws its interface on stderr, and a native command called from a
-# PSReadLine key handler has every stream collected by the pipeline the handler
-# discards, which leaves the interface nowhere to appear. sk is started with
-# only stdin and stdout redirected so that it inherits the console for stderr.
+# When a native command runs in a PSReadLine key handler, the handler's pipeline
+# collects and discards every stream. Skim draws its interface on stderr, so
+# redirect only stdin and stdout.
 function Invoke-SkellSearch([string]$SkPath, [string[]]$SkArgs, [string[]]$Lines, [string]$GawkDir) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $SkPath
@@ -311,8 +305,8 @@ function Invoke-SkellSearch([string]$SkPath, [string[]]$SkArgs, [string[]]$Lines
     $psi.Environment['PATH'] = "$GawkDir$([System.IO.Path]::PathSeparator)$($psi.Environment['PATH'])"
 
     $proc = [System.Diagnostics.Process]::Start($psi)
-    # The read is started before the write: a full stdout pipe would otherwise
-    # stall sk while skell is still feeding it candidates.
+    # Start the stdout read before writing candidates; a full pipe would stall
+    # sk while skell feeds it.
     $reading = $proc.StandardOutput.ReadToEndAsync()
     foreach ($item in $Lines) { $proc.StandardInput.WriteLine($item) }
     $proc.StandardInput.Close()
@@ -320,24 +314,17 @@ function Invoke-SkellSearch([string]$SkPath, [string[]]$SkArgs, [string[]]$Lines
     return @(($reading.GetAwaiter().GetResult() -split "\r?\n") | Where-Object { $_.Length -gt 0 })
 }
 
-# gawk writes the ranked file itself: `>` would decode the native command's
-# stdout and re-encode every non-ASCII command in the store. The preview runs
-# gawk rather than a nested pwsh, whose startup cost is several times skim's
-# whole debounce budget.
+# Pass the ranked-file path with gawk's `out` variable; PowerShell redirection
+# would decode gawk's stdout and re-encode non-ASCII command text. The preview
+# runs gawk directly instead of starting a nested pwsh process.
 if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
     Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -BriefDescription 'Search skell history' -ScriptBlock {
-        # PSReadLine renders the prompt and the line through Console.Out, whose
-        # encoder replaces every glyph outside the console's code page with a
-        # question mark. skim writes the store's bytes to the console it
-        # inherits, which reads them by the same code page. Both hold for the
-        # length of the search, and the console keeps the code page the session
-        # started with.
+        # PSReadLine redraws through the console while skim draws on inherited
+        # stderr. Keep [Console]::OutputEncoding at UTF-8 through the redraw,
+        # then restore the session encoding.
         $priorEncoding = [Console]::OutputEncoding
         try {
             [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-            # PSReadLine reduces an exception raised by a key handler to
-            # a one-line dump pointing at $error, so a missing executable
-            # is reported before the call operator reaches for it.
             $gawk = Get-SkellGawkPath
             if (-not $gawk) {
                 Write-Warning 'skell: history search found no gawk; install one or set SKELL_GAWK to its path'
@@ -360,12 +347,12 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
 
             $rank = Get-SkellRankPath
 
-            # gawk's -v processes escape sequences in the value, so a path
-            # spelled with backslashes loses every one that precedes a letter.
+            # gawk's -v interprets backslash escapes, so pass POSIX-style paths
+            # instead of native paths with backslashes.
             $rankArg = $rank.Replace('\', '/')
             $awkDir = (Join-Path -Path $env:SKELL_ROOT -ChildPath 'share').Replace('\', '/')
-            # A ranked file left by an earlier keypress must not stand in
-            # for this one when gawk fails.
+            # Remove a stale ranked file before gawk runs; a failed run must not
+            # reuse it.
             if ([System.IO.File]::Exists($rank)) { Remove-Item -LiteralPath $rank -Force }
             try { & $gawk -f "$awkDir/rank.awk" -v "out=$rankArg" $env:SKELL_HISTORY } catch {
                 Write-Warning "skell: $gawk did not run: $($_.Exception.Message)"
@@ -375,10 +362,9 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
             if ($LASTEXITCODE -ne 0 -or -not [System.IO.File]::Exists($rank)) { return }
             if (([System.IO.FileInfo]::new($rank)).Length -eq 0) { return }
 
-            # cmd drops the first and last quote of a command string that opens
-            # and closes with one, which would cut a gawk path holding a space.
-            # The preview names the executable alone and reaches it through the
-            # PATH that Invoke-SkellSearch gives sk.
+            # cmd.exe removes the first and last quote from a preview command
+            # that starts and ends with a quote, so pass the executable name
+            # through PATH and quote only its arguments.
             $gawkName = [System.IO.Path]::GetFileName($gawk)
             $preview = "$gawkName -f `"$awkDir/codec.awk`" -f `"$awkDir/preview-history.awk`" -v n={1} `"$rankArg`""
 
