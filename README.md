@@ -4,13 +4,13 @@ One command history for bash, fish, PowerShell, and zsh, searched with
 [skim](https://github.com/skim-rs/skim). In zsh, skell also replaces the
 tab-completion menu.
 
-Every shell appends to the same file with its own builtins, so recording does
-not spawn a process. Search spawns skim once, then one preview helper per
-candidate skim settles on.
+Every shell appends to the same file without spawning a process on the recording
+path. Search starts skim once and runs the preview helper for the candidate under
+the cursor.
 
 ## Requirements
 
-Windows, Linux, and macOS, with the shells you want to wire up:
+Skell runs on Windows, Linux, and macOS with the shells you want to wire up:
 
 | shell      | needs | tested against |
 | ---------- | ----- | -------------- |
@@ -19,22 +19,23 @@ Windows, Linux, and macOS, with the shells you want to wire up:
 | PowerShell | 7.0   | 7.6            |
 | zsh        |       | 5.9            |
 
-bash 5.0 supplies `EPOCHSECONDS`, fish 4.0 supplies both `path mtime` and the
+Bash 5.0 supplies `EPOCHSECONDS`, fish 4.0 supplies both `path mtime` and the
 `ctrl-r` key notation the binding uses, and PowerShell 7 supplies
-`FileSystemAclExtensions`. zsh needs nothing newer than the version this was
-written against; the parameter flags and hooks it uses are much older.
+`FileSystemAclExtensions`. The zsh integration uses parameter flags and hooks
+available before the tested 5.9 release.
 
 - [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6. The
-  `accept(edit)` and `accept(run)` binds are the current form of a bind skim
-  also accepts in a deprecated spelling.
+  `accept(edit)` and `accept(run)` binds are skim's current syntax; skim also
+  accepts their deprecated spelling.
 - `gawk` for ranking and previews (`mktime`, `systime`, and `PROCINFO` are GNU
   extensions). Windows ships no awk, and neither MSYS2 nor Git for Windows puts
-  its `usr\bin` on the native `PATH`, so the PowerShell module looks for
-  `gawk.exe` beside the `git` on `PATH` and then in `C:\msys64\usr\bin`. Git for
-  Windows ships gawk at the first of those. `scoop install gawk` installs a
-  native build on the `PATH` instead. The module reads `SKELL_GAWK` as the path
-  to a gawk executable ahead of both; the other shells resolve `gawk` through
-  the `PATH` alone.
+  its `usr\bin` on the native `PATH`, so the PowerShell module searches for
+  `gawk.exe` on `PATH`, in Git for Windows' `usr\bin` under the installation
+  that provides `git` on `PATH`, and in `C:\msys64\usr\bin`. Git for Windows
+  provides the copy in that `usr\bin` directory. Scoop can install a native
+  build with `scoop install gawk`.
+  Set `SKELL_GAWK` to override these lookups; the other shells resolve `gawk`
+  only through `PATH`.
 - [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
   preview; without lsd the preview uses `ls`
 
@@ -46,10 +47,10 @@ Clone the repository, then wire the shells you use:
 git clone https://github.com/kvnxiao/skell ~/github/skell
 ```
 
-**fish** — [fisher](https://github.com/jorgebucaran/fisher) copies a plugin's
-root `conf.d/` and `functions/` but never its `share/`, so fish installs from
-`fish-releases`, a generated branch with the awk scripts inside `functions/`.
-fish is the one shell that does not read the clone:
+**fish** — [fisher](https://github.com/jorgebucaran/fisher) installs only a
+plugin's root `conf.d/` and `functions/` directories. The generated
+`fish-releases` branch therefore puts the awk scripts inside `functions/`.
+Fish installs from `fish-releases` instead of the clone:
 
 ```fish
 fisher install kvnxiao/skell@fish-releases
@@ -65,26 +66,24 @@ zmodule ~/github/skell/zsh -n skell
 
 Without zim, source `zsh/init.zsh` from `.zshrc`.
 
-**bash** — source it before starship, which moves any `PROMPT_COMMAND` it finds
-into `STARSHIP_PROMPT_COMMAND` and runs it with `$?` restored:
+**bash** — source it before starship. Starship moves any `PROMPT_COMMAND` it
+finds into `STARSHIP_PROMPT_COMMAND` and runs it with `$?` restored:
 
 ```bash
 [ -f ~/github/skell/bash/skell.bash ] && . ~/github/skell/bash/skell.bash
 ```
 
 **PowerShell** — import it last, after starship and zoxide. The prompt wrapper
-defined last runs first, which is the only point where `$?` still belongs to the
-user's command:
+defined last runs first while `$?` still records the user's command:
 
 ```powershell
 Import-Module "$HOME\github\skell\powershell\Skell.psm1"
 ```
 
-`Remove-Module Skell` puts the prompt and the PSReadLine history handler back as
-it found them.
+`Remove-Module Skell` restores the prompt and the PSReadLine history handler.
 
-`sk` is resolved through the `PATH` the session runs with. When either `sk` or
-`gawk` is missing, `Ctrl+R` warns and leaves the line untouched.
+`sk` is resolved through the session's `PATH`. When either `sk` or `gawk` is
+missing, `Ctrl+R` warns and leaves the line untouched.
 
 ## History search
 
@@ -101,11 +100,11 @@ that does not answer DSR leaves the command on the line for `Enter`.
 
 ## Completion menu
 
-zsh only. skell binds `Tab` and offers zsh's own matches through skim, so your
-completers, matcher lists, and `:completion:*` styles still decide what the
-candidates are. skell changes one style: it forces
-`zstyle ':completion:*' list-grouped false` to keep matches that share a
-description on separate rows.
+The completion menu applies to zsh only. Skell binds `Tab` and sends zsh's own
+matches through skim. Zsh's
+completers, matcher lists, and `:completion:*` styles still supply the
+candidates. Skell sets `zstyle ':completion:*' list-grouped false` to keep
+matches that share a description on separate rows.
 
 | key          | action                         |
 | ------------ | ------------------------------ |
@@ -115,27 +114,29 @@ description on separate rows.
 | `Enter`      | insert the selection           |
 | `Esc`        | leave the line untouched       |
 
-zsh inserts an unambiguous prefix before it offers a choice, so completing
-`sub` against `subdir-one` and `subdir-two` inserts `subdir-` and opens the menu
-on the next `Tab`.
+Zsh inserts an unambiguous prefix before opening the menu. Completing `sub`
+against `subdir-one` and `subdir-two` inserts `subdir-`; the next `Tab` opens the
+menu.
 
-When the candidates fall into more than one group, each group's description is
-shown beside its match in a dim column, capped at 20 characters and elided past
-it. A single group leaves the column out. A query filters on the match alone, so
-the query `co` does not select every entry under a group named `commands`. The
-`format` style supplies that text, so a verbose value such as `Completing %d`
-fills the column and a bare `%d` does not.
+When candidates span groups, Skell shows each group description beside its
+matches in a dim column. It caps descriptions at 20 characters and elides
+longer text. With one group, Skell omits the column. Queries filter matches, not
+group descriptions: `co` does not select every entry under a group named
+`commands`. The `format` style supplies the group text. A value such as
+`Completing %d` fills the column; bare `%d` does not.
 
-The preview runs `lsd` on a candidate that names a directory, and prints the
-description of any other candidate. The preview window appears only when the
-candidate set contains a directory.
+When a candidate names a directory, the preview uses `lsd` when available and
+otherwise uses `ls`. For any other candidate, the preview prints its
+description. The preview window appears only when the candidate set contains a
+directory.
 
 Selecting more than one match inserts them all, separated by spaces.
 
 ## Store
 
-`$XDG_DATA_HOME/skell/history.tsv`, defaulting to
-`~/.local/share/skell/history.tsv`. One record per line, tab separated:
+Skell uses `$XDG_DATA_HOME/skell/history.tsv` and defaults to
+`~/.local/share/skell/history.tsv` when `XDG_DATA_HOME` is unset. The file
+contains one tab-separated record per line:
 
 ```
 <epoch>	<directory>	<exit>	<shell>	<command>
@@ -149,116 +150,116 @@ pairs before it reads any other escape, so a command holding a literal `\n` and
 a command holding a newline round-trip to different strings. NUL is the one
 byte outside the contract: no supported line editor produces it.
 
-A trailing `\+` marks a record that the length cap cut. Where the directory
-alone is long enough to leave no room for the command, the directory is stored
-as `unknown` and the command is kept whole.
+A trailing `\+` marks a record cut by the length cap. If the directory alone is
+long enough to leave no room for the command, the directory is stored as
+`unknown` and the command is kept whole.
 
-Set `SKELL_HISTORY` to move the file and `SKELL_DATA_DIR` to move the directory
-that holds it.
+Set `SKELL_HISTORY` to move the file. Set `SKELL_DATA_DIR` to move its
+containing directory.
 
 ### Who can read it
 
-The store holds every command you run. skell creates the directory `0700` and
-the file `0600` on Linux and macOS, and on Windows the PowerShell module
+The store contains the commands recorded by skell. Skell creates the directory
+`0700` and the file `0600` on Linux and macOS. On Windows, the PowerShell module
 replaces the inherited descriptor with a single entry for your own account.
 
-Cygwin and MSYS2 mount NTFS with `noacl`, which discards the umask, so bash,
-fish, and zsh on Windows cannot set a mode: the store keeps whatever the parent
-directory grants. Import the PowerShell module once to tighten it, or set the
-ACL yourself with `icacls`.
+Cygwin and MSYS2 mount NTFS with `noacl`, which discards the umask. Bash, fish,
+and zsh on Windows cannot set a mode, so the store keeps the permissions the
+parent directory grants. On Windows, the PowerShell module applies the
+single-account ACL when it creates the store items; set an existing ACL with
+`icacls`.
 
 ### Why it does not need a lock
 
-An MSYS2 `flock` and a Windows named mutex cannot see each other, so no lock
-spans these shells. Cygwin's `O_APPEND` compiles to a single `NtWriteFile` at
-`FILE_WRITE_TO_END_OF_FILE` and .NET's `FILE_APPEND_DATA` reaches the same
-kernel atomic append, so the two interoperate without coordination.
+MSYS2 `flock` and a Windows named mutex use different lock mechanisms. No
+shared lock spans these shells. Cygwin's `O_APPEND` compiles to a single
+`NtWriteFile` at `FILE_WRITE_TO_END_OF_FILE`, and .NET's `FILE_APPEND_DATA`
+reaches the same kernel atomic append. These append operations interoperate
+without a shared lock.
 
-Every record leaves in one write, sized to stay inside the window where
-concurrent appenders interleave without tearing. On NTFS through the Cygwin and
-MSYS2 runtimes, which is where skell is tested, that window is 1024 bytes; a
-longer record is cut to fit rather than torn. The cap is counted in characters
-rather than bytes, since a byte count would cost a second pass in every writer,
-so a record holding any non-ASCII code point is held to a quarter of the budget:
-four bytes is the widest UTF-8 encoding. Other platforms and filesystems are
-untested, and a filesystem with a smaller atomic-append window would need the
-cap lowered in every writer at once.
+Each writer appends a record with one write, and each record stays inside the
+atomic-append window. On NTFS under Cygwin and MSYS2, Skell tests a 1024-byte
+window. The fitter cuts longer records to fit. The cap uses characters rather
+than bytes to avoid a second pass in each writer. For non-ASCII input, it limits
+a record to one quarter of the 1000-byte budget because UTF-8 code points use at
+most four bytes. Other platforms and filesystems are untested. Lower the cap in
+every writer if a filesystem has a smaller atomic-append window.
 
-The writers count characters differently. gawk and fish count code points; bash
-and zsh count UTF-16 units under Cygwin's 16-bit `wchar_t`, as PowerShell does.
-Both counts stay inside 1024 bytes, so no record is ever torn, but a command
-outside the Basic Multilingual Plane — emoji, most historic scripts — is cut at
-a different point depending on which shell recorded it. Making the counts match
-would need a per-code-point scan on the prompt path in bash and zsh, which
-recording may not do.
+Writers count characters differently: gawk and fish count code points; Bash and
+zsh count UTF-16 units under Cygwin's 16-bit `wchar_t`, as PowerShell does. Both
+methods stay within the 1024-byte window, but a command outside the Basic
+Multilingual Plane — emoji and most historic scripts — is cut at a different
+point depending on which shell recorded it. Matching the counts would require a
+per-code-point scan on the Bash and zsh prompt paths, and recording cannot
+perform that scan.
 
-PowerShell reaches that append through `FileSystemAclExtensions`.
+PowerShell uses `FileSystemAclExtensions` for the append.
 `AppendAllText`, `Add-Content`, and `Out-File -Append` all open `GENERIC_WRITE`
-without `FILE_APPEND_DATA` and emulate the append as `GetLength()` plus a
-positional write, which races another shell mid-command; they also open
+without `FILE_APPEND_DATA`. These methods emulate append as `GetLength()` plus
+a positional write and can race another shell mid-command. They also open
 `FileShare.Read`, so a second writer throws.
 
 ### Directories are machine-local
 
-A record names the directory but not the machine, and skell has no field for
-one. A path recorded on another machine is read back as a plain string, so it
-may name a directory that does not exist or a different directory entirely.
-On Windows every shell records the MSYS2 form (`/c/Users/...`); PowerShell folds
-its native path to match. A location outside the FileSystem provider, such as a
-registry path, records as `unknown`.
+A record contains the directory but no machine identifier. A path recorded on
+another machine is read back as a plain string, so it may name a directory that
+does not exist or a different directory entirely. On Windows every shell records
+the MSYS2 form (`/c/Users/...`); PowerShell folds its native path to match. A
+location outside the FileSystem provider, such as a registry path, records as
+`unknown`.
 
 ### Leading-space commands
 
-A command typed with a leading space is excluded. skell checks the leading space
-in its own hook, so the store never holds one regardless of how the shell is
-configured.
+Skell excludes commands typed with a leading space. It applies this check in its
+own hook, so shell history configuration cannot re-enable those commands.
 
-skell also leaves each shell's own exclusions working:
+Each shell's own history exclusions remain active:
 
-- bash keeps whatever `HISTCONTROL` and `HISTIGNORE` you set; skell adds
+- Bash preserves your `HISTCONTROL` and `HISTIGNORE` settings; Skell adds
   `ignorespace` to `HISTCONTROL` only where neither `ignorespace` nor
   `ignoreboth` is already present.
-- fish excludes leading-space commands by default.
-- in PowerShell, skell consults any `AddToHistoryHandler` already installed
+- Fish excludes leading-space commands by default.
+- PowerShell consults any `AddToHistoryHandler` already installed
   before its own.
-- zsh gets `HIST_IGNORE_SPACE`, an independent option that leaves your other
+- Zsh gets `HIST_IGNORE_SPACE`, an independent option that leaves your other
   history options alone.
 
-A command your shell excludes from its own history still reaches skell's store
-unless it starts with a space. There is no denylist.
+Commands rejected by a shell's own history filter do not reach skell's store.
+Commands accepted by that filter still reach the store unless their typed form
+starts with a space. Skell has no additional denylist.
 
 ## Ranking
 
-Frecency, computed in one read-time pass with no stored state: the sum over
-every occurrence of a decay by age — 4 within the hour, 2 within the day, 0.5
-within the week, 0.25 beyond. Ties go to the more recent command.
+Skell computes frecency in one read-time pass without stored state. The score
+sums an age-based weight for each occurrence: 4 within the hour, 2 within the
+day, 0.5 within the week, and 0.25 beyond. Ties go to the more recent command.
 
 Duplicate records are kept; each occurrence adds to the score.
 
 ## Migrating from atuin
 
 ```sh
-bash share/migrate-atuin.sh            # writes the default store
-bash share/migrate-atuin.sh --append   # adds to an existing one
-bash share/migrate-atuin.sh --dry-run  # converts and validates without writing
-bash share/migrate-atuin.sh --force    # skips the confirmation prompt
+bash share/migrate-atuin.sh
+bash share/migrate-atuin.sh --append
+bash share/migrate-atuin.sh --dry-run
+bash share/migrate-atuin.sh --force
 ```
 
-Close the shells that record to the store first. The import rewrites the file
-rather than appending to it, so an append from another shell during the run
-would be lost; without `--force` it asks before starting.
+Before importing, close the shells that record to the store. The import replaces
+the file instead of appending; an append from another shell during the run is
+lost. Without `--force`, the command prompts before starting.
 
-The conversion goes to a temporary file beside the target and is validated for
-field count, record length, and oldest-first order before a rename publishes it.
-A run that fails partway leaves the target byte for byte as it was, and retrying
-cannot duplicate a partial prefix. Where the target already exists, its
-permissions are kept.
+The conversion writes to a temporary file beside the target. The command
+validates the converted records for field count, record length, and oldest-first
+order, then renames the staged file into place. If conversion fails, the target
+remains byte for byte unchanged. Retrying does not duplicate a partial prefix.
+Existing target permissions are preserved.
 
-A `workspaces = true` config narrows `atuin history list` to the git repository
-that the export runs in, so the export overrides `ATUIN_FILTER_MODE`. Running it
-in a fresh repository would otherwise write nothing. The export also passes
-`--reverse=true` rather than relying on whichever order the installed atuin
-defaults to.
+With `workspaces = true`, atuin limits `history list` to the Git repository that
+contains the current directory. The export sets `ATUIN_FILTER_MODE=global`, which
+includes history from all repositories. Without that override, a fresh
+repository can produce no records. The export passes `--reverse=true` to request
+oldest-first output.
 
 ## Tests
 
@@ -266,13 +267,13 @@ defaults to.
 bash tests/run-all.sh
 ```
 
-Each suite builds its own store under a temporary directory and never reads
-yours. A shell the machine does not have is skipped and named in the summary.
-The mode assertions in `tests/permissions.sh` are skipped where the filesystem
-discards the umask, which is every NTFS mount under Cygwin and MSYS2.
+Each suite builds its own store under a temporary directory and never reads your
+live store. Suites for unavailable shells are skipped and named in the summary. The
+mode assertions in `tests/permissions.sh` are skipped when the filesystem
+discards the umask, including NTFS mounts under Cygwin and MSYS2.
 
-No suite drives a real line editor, so a key binding or a completion-menu
-change has to be exercised by hand.
+No suite drives a real line editor. Exercise key bindings and completion-menu
+changes by hand.
 
 ## License
 
