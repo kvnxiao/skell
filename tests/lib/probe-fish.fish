@@ -1,30 +1,23 @@
-# Exercise fish's codec against the vector specs. A generated prelude sets
-# fish_function_path, SKELL_VECTORS_TSV, and SKELL_OUT_DIR in MSYS2's own
-# spelling and sources this file, because the environment that an agent's bash
-# sets does not reach an MSYS2 fish.
+# A generated MSYS2 prelude sets fish_function_path, SKELL_VECTORS_TSV, and
+# SKELL_OUT_DIR before sourcing this file.
 #
-# Each vector is rebuilt here from the %XX spec rather than carried in, because
-# neither transport across the runtime boundary is lossless: MSYS2 rewrites a
-# CRLF byte pair on a file read and re-parses backslashes out of a command line
-# that a Git-for-Windows bash built. The spec holds nothing above 0x7F, so the
-# bytes are reconstructed without needing the file's encoding. Nothing on the
-# recording path reads a command from a file, so this constrains the harness
-# alone.
+# MSYS2 converts CRLF during file reads and reparses backslashes in command
+# lines built by Git Bash. Rebuild vectors from %XX specs. The specs contain
+# only ASCII bytes; reconstruction does not depend on file encoding.
+# Recording hooks do not read commands from files; this constraint applies only
+# to the test harness.
 
-# The whole spec is converted at once rather than byte by byte: `string collect`
-# strips a lone newline, so a per-byte loop loses the 0x0A vector entirely. The
-# guard bytes stay on the returned value, or a vector ending in a newline would
-# reach the function under test already truncated.
+# Per-byte command substitutions would discard a lone newline. Decode the whole
+# spec at once. Keep guard bytes to preserve trailing newlines for the function
+# under test.
 function _probe_unhex -a spec
     set -l bs \x5c
     printf '%b' (string replace -a '%' $bs"x" "X$spec"X | string collect --allow-empty)
 end
 
-# The guards are never removed here. Escaping and decoding both leave an `X`
-# alone, so the guarded value round-trips to the guarded expectation, and the
-# driver compares against expectations it bracketed the same way. Stripping
-# inside fish would mean emitting an unguarded trailing newline, which every
-# `string` call and command substitution trims.
+# Keep guards through both functions. Escaping and decoding preserve `X`, and
+# the driver brackets expected values the same way. Removing the guards in fish
+# would expose trailing newlines to trimming.
 
 for line in (cat $SKELL_VECTORS_TSV)
     string match -q '#*' -- $line; and continue
@@ -34,8 +27,8 @@ for line in (cat $SKELL_VECTORS_TSV)
     set -l raw (_probe_unhex "$f[2]" | string collect --allow-empty --no-trim-newlines)
     set -l enc (_probe_unhex "$f[3]" | string collect --allow-empty --no-trim-newlines)
 
-    # Both functions print a trailing newline that `string collect` strips, so
-    # the result is re-emitted with printf rather than redirected straight out.
+    # Both functions print a trailing newline that `string collect` strips.
+    # Re-emit the collected value with printf.
     set -l got_enc (_skell_escape "$raw" | string collect --allow-empty)
     set -l got_dec (_skell_unescape "$enc" | string collect --allow-empty)
     printf '%s' "$got_enc" >$SKELL_OUT_DIR/$name.enc.out

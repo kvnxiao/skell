@@ -4,9 +4,8 @@
 # Lines are printed best first; on tied match scores, skim's index tiebreak
 # falls back to that order.
 #
-# Pass -v out=<path> to write the file directly. PowerShell's `>` decodes a
-# native command's stdout before writing it, which would re-encode every
-# non-ASCII command in the store.
+# PowerShell decodes native stdout before redirecting it and would re-encode
+# non-ASCII commands. Pass -v out=<path> for direct output.
 
 function weight(age) {
   if (age < 3600) return 4
@@ -27,7 +26,7 @@ NF < 5 { next }
 
 {
   cmd = $5
-  # A recorded command contains no literal tab, but a hand-edited store might.
+  # Rejoin extra fields from a hand-edited store that contains literal tabs.
   for (i = 6; i <= NF; i++) cmd = cmd FS $i
   if (cmd == "") next
 

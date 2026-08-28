@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Drive each shell's recording hook and check what lands in the store.
-#
-# bash runs a real interactive shell, so its records come from the line editor.
-# zsh and fish are called at the hook boundary with the arguments their editors
-# pass, because no pty is available on every supported platform. Neither path
-# covers the key bindings; exercise those by hand.
+# bash records through real interactive history. A PTY is not available on
+# every platform. The zsh and fish fixtures call hook boundaries. Test key
+# bindings by hand.
 # shellcheck source=tests/lib/harness.sh disable=SC2016
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/harness.sh"
 
@@ -20,8 +17,6 @@ assert_store() {
   bad=$(LC_ALL=C gawk -e 'length($0) > 1000 { n++ } END { print n + 0 }' "$store")
   skell_eq "$label: every record fits the budget" 0 "$bad"
 }
-
-# ---------------------------------------------------------------- bash
 
 bash_store="$SKELL_SANDBOX/bash.tsv"
 bash_data="$SKELL_SANDBOX/bash-data"
@@ -39,7 +34,7 @@ if [ "${bash_major:-0}" -lt 5 ]; then
   printf '%s: bash %s predates EPOCHSECONDS; bash assertions skipped\n' \
     "$skell_name" "$(bash -c 'echo "$BASH_VERSION"' 2>/dev/null)"
 else
-  # HISTFILE is isolated so the shell starts with an empty history list.
+  # Isolate HISTFILE to start the shell with an empty history list.
   printf '%s\n' \
     'true' \
     ' echo excluded' \
@@ -58,8 +53,6 @@ else
   skell_eq 'bash records an absolute directory' 1 \
     "$(gawk -F'\t' -e 'NR == 1 && $2 ~ /^(\/|[A-Za-z]:)/ { print 1 }' "$bash_store")"
 fi
-
-# ---------------------------------------------------------------- zsh
 
 zsh_store="$SKELL_SANDBOX/zsh.tsv"
 {
@@ -84,8 +77,6 @@ if command -v zsh >/dev/null 2>&1; then
   skell_false 'zsh excludes the leading-space command' grep -q 'excluded' "$zsh_store"
 fi
 
-# ---------------------------------------------------------------- fish
-
 fish_store="$SKELL_SANDBOX/fish.tsv"
 {
   printf 'set -gx PATH /usr/bin /bin $PATH\n'
@@ -107,7 +98,6 @@ if command -v fish >/dev/null 2>&1; then
   skell_eq 'fish records the first command' 'true' "$(col 1 5 "$fish_store")"
   skell_eq 'fish preserves a failing exit status' 7 "$(col 2 3 "$fish_store")"
   skell_false 'fish excludes the leading-space command' grep -q 'excluded' "$fish_store"
-  # A stamp built from $HOME's mtime plus its age must be the current epoch.
   now=$(date +%s)
   stamp=$(col 1 1 "$fish_store")
   if [ -n "$stamp" ] && [ "$stamp" -gt $((now - 120)) ] && [ "$stamp" -le $((now + 120)) ]; then
@@ -117,13 +107,10 @@ if command -v fish >/dev/null 2>&1; then
   fi
 fi
 
-# ---------------------------------------------------------------- pwsh
-
 if command -v pwsh >/dev/null 2>&1; then
   pwsh_store="$SKELL_SANDBOX_WIN/pwsh.tsv"
-  # Get-History is empty under -Command, so the record is written through the
-  # store opener directly: this covers the append and the field layout, not the
-  # history-entry read.
+  # Get-History is empty under -Command. Write through the store opener to test
+  # append and field layout; this does not test history-entry reads.
   pwsh -NoLogo -NoProfile -Command "
     \$env:SKELL_DATA_DIR = '$SKELL_SANDBOX_WIN/pwsh-data'
     \$env:SKELL_HISTORY = '$pwsh_store'

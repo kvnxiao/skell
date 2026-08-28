@@ -1,15 +1,11 @@
-# Exercise zsh's codec against the vector specs. A generated prelude exports
-# SKELL_ROOT, SKELL_VECTORS_TSV and SKELL_OUT_DIR in MSYS2's own spelling and
-# sources this file, because the environment an agent's bash sets does not
-# reach an MSYS2 zsh.
+# A generated MSYS2 prelude exports SKELL_ROOT, SKELL_VECTORS_TSV, and
+# SKELL_OUT_DIR before sourcing this file.
 #
-# Each vector is rebuilt here from the %XX spec rather than carried in, because
-# neither transport across the runtime boundary is lossless: MSYS2 zsh rewrites
-# a CRLF byte pair as a bare newline on every file read, and the MSYS2 runtime
-# re-parses backslashes out of a command line that a Git-for-Windows bash built.
-# The spec holds nothing above 0x7F, so ${(#)} reconstructs it without needing
-# the file's encoding. Nothing on the recording path reads a command from a
-# file, so this constrains the harness alone.
+# MSYS2 zsh converts CRLF on file reads and reparses backslashes in Git Bash
+# command lines. Rebuild vectors from %XX specs. The specs contain only ASCII
+# bytes; ${(#)} reconstruction does not depend on file encoding.
+# Recording hooks do not read commands from files; this constraint applies only
+# to the test harness.
 
 source $SKELL_ROOT/zsh/init.zsh
 

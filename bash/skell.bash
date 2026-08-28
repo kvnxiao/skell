@@ -14,18 +14,16 @@ fi
 : "${SKELL_HISTORY:=$SKELL_DATA_DIR/history.tsv}"
 export SKELL_ROOT SKELL_DATA_DIR SKELL_HISTORY
 
-# The store holds every command the user runs. Creating the directory and the
-# file here under a private umask keeps the first append from creating the store
-# at the caller's.
+# The store contains the user's command history. Create new data directories
+# and stores under a private umask.
 if [ ! -d "$SKELL_DATA_DIR" ]; then
   (umask 077; mkdir -p "$SKELL_DATA_DIR") || return 0
 fi
 [ -e "$SKELL_HISTORY" ] || (umask 077; : > "$SKELL_HISTORY")
 
-# `ignoredups` leaves HISTCMD unchanged on a repeated command, which
-# _skell_record reads as "nothing new ran"; frecency counts those repeats.
-# HISTCONTROL is the user's, so ignorespace joins whatever is already set
-# rather than replacing it, and HISTIGNORE is left alone.
+# Preserve the user's HISTCONTROL and HISTIGNORE settings while adding
+# ignorespace. With ignoredups, repeated commands do not advance HISTCMD and
+# cannot be recorded.
 case :${HISTCONTROL-}: in
   *:ignorespace:* | *:ignoreboth:*) ;;
   *) HISTCONTROL=${HISTCONTROL:+$HISTCONTROL:}ignorespace ;;
@@ -46,14 +44,12 @@ _skell_escape() {
   _skell_reply=${s//$'\r'/\\r}
 }
 
-# Concurrent appenders interleave without tearing up to 1024 bytes on NTFS
-# through the Cygwin and MSYS2 runtimes, which is where skell is tested. A
-# record holding any non-ASCII code point is capped at a quarter of the budget,
-# since four bytes is the widest UTF-8 encoding and a byte count would need a
-# second pass. ${#var} counts UTF-16 units under Cygwin's 16-bit wchar_t, as
-# zsh and PowerShell do, while gawk and fish count code points; either count
-# stays inside 1000 bytes, so a command outside the BMP is cut at a different
-# point depending on which shell recorded it.
+# On NTFS, the tested Cygwin and MSYS2 runtimes append up to 1024 bytes without
+# interleaving. Records use a 1000-byte budget. Because each UTF-8 code point
+# may use four bytes, records with non-ASCII text use a 250-character limit
+# without another counting pass. Cygwin bash counts UTF-16 units, while gawk
+# and fish count code points. Both stay within the budget, but they may trim an
+# astral command at different positions.
 _skell_fit() {
   local head=$1 cmd=$2 limit=1000 record
   record="$head"$'\t'"$cmd"
@@ -73,8 +69,8 @@ _skell_fit() {
     case $record in
       *[![:ascii:]]*) limit=250 ;;
     esac
-    # Dropping the directory can be enough on its own, and a record that now
-    # fits is whole: marking it elided would claim a cut that never happened.
+    # If replacing the directory makes the whole command fit, return the
+    # record without an elision marker.
     if [ ${#record} -le $limit ]; then
       _skell_reply=$record
       return 0
@@ -83,8 +79,7 @@ _skell_fit() {
     [ $keep -lt 0 ] && keep=0
   fi
   cmd=${cmd:0:keep}
-  # An even run of trailing backslashes is whole escape pairs; an odd run means
-  # the cut landed inside one, so the last backslash goes.
+  # If the cut leaves an odd run of backslashes, drop the incomplete escape.
   local run=0 i=${#cmd}
   # shellcheck disable=SC1003  # the pattern is one literal backslash
   while [ "$i" -gt 0 ] && [ "${cmd:i-1:1}" = '\' ]; do run=$((run + 1)); i=$((i - 1)); done
@@ -92,14 +87,11 @@ _skell_fit() {
   _skell_reply="$head"$'\t'"$cmd"'\+'
 }
 
-# HISTCMD advances only when a command enters the history list, so an empty
-# line, a command the user's HISTCONTROL or HISTIGNORE excluded, and a shell
-# whose HISTFILE was empty all leave it unchanged. `history 1` on its own would
-# replay the previous command for each of those.
-# A command substitution around `history 1` costs a Cygwin fork on every
-# prompt, so the builtin writes to a scratch file and stays in this shell.
-# starship reads $? from whatever PROMPT_COMMAND entry ran before it, so every
-# exit path returns the status the user's command ended on.
+# HISTCMD advances only when bash adds a command to its history. If it does not
+# change, reading `history 1` would record the previous command again.
+# Under Cygwin, command substitution would fork. Write `history 1` to a scratch
+# file. Starship reads $? from the previous PROMPT_COMMAND entry.
+# Every exit path returns the user's command status.
 _skell_record() {
   local code=$?
   [ "$HISTCMD" = "$_skell_histnum" ] && return "$code"
@@ -111,8 +103,8 @@ _skell_record() {
 
   local HISTTIMEFORMAT whole num cmd dir _skell_reply
   history 1 > "$_skell_scratch" || return "$code"
-  # A multiline command is one history entry spanning several output lines, so
-  # the read has to reach EOF. -d '' returns non-zero there and still assigns.
+  # A multiline history entry spans several lines. Read to EOF.
+  # `read -d ''` returns non-zero at EOF after assigning the value.
   IFS= read -r -d '' whole < "$_skell_scratch"
   whole=${whole%$'\n'}
   whole=${whole#"${whole%%[![:space:]]*}"}
@@ -129,8 +121,7 @@ _skell_record() {
 
   _skell_escape "$cmd"
   cmd=$_skell_reply
-  # A directory holding a tab or a newline would shift every field that follows
-  # it, so it is escaped on the same terms as the command.
+  # Escape tabs and newlines in the directory before writing the TSV fields.
   _skell_escape "$PWD"
   dir=$_skell_reply
 
@@ -144,10 +135,8 @@ case ";${PROMPT_COMMAND:-};" in
   *) PROMPT_COMMAND="_skell_record${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
 esac
 
-# The encoded backslash pair is consumed before any other escape is decoded, so
-# a byte the store holds literally can never be read as an escape introducer. A
-# decoder that swapped in a placeholder byte would rewrite that byte when it
-# restored the backslashes.
+# Decode doubled backslashes before other escapes. A placeholder byte could
+# collide with literal store content.
 _skell_unescape() {
   local s=$1 out='' raw dec
   while :; do
@@ -192,9 +181,8 @@ _skell_history_widget() {
   READLINE_LINE=$_skell_reply
   READLINE_POINT=${#READLINE_LINE}
 
-  # A `bind -x` handler cannot submit the line, so the terminal is asked for a
-  # status report and its reply is bound to accept-line. A terminal that does
-  # not answer DSR leaves the line for Enter.
+  # A `bind -x` handler cannot submit the line. Bind the terminal's DSR reply to
+  # accept-line; terminals without DSR support leave the command for Enter.
   if [ "$key" = run ]; then
     bind '"\e[0n": accept-line' 2>/dev/null
     printf '\e[5n'

@@ -12,8 +12,8 @@ if not set -q SKELL_DATA_DIR
 end
 set -q SKELL_HISTORY; or set -gx SKELL_HISTORY $SKELL_DATA_DIR/history.tsv
 
-# The store holds every command the user runs, so the directory and the file
-# are created under a private umask rather than the caller's.
+# The store contains the user's command history. Create new data directories
+# and stores under a private umask.
 if not test -d $SKELL_DATA_DIR; or not test -e $SKELL_HISTORY
     set -l prior_umask (umask)
     umask 077
@@ -26,42 +26,37 @@ function _skell_exit --on-event fish_exit
     command rm -f -- $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv
 end
 
-# A record is one `echo` into an O_APPEND file descriptor, which Cygwin
-# compiles to a single NtWriteFile at FILE_WRITE_TO_END_OF_FILE. Concurrent
-# appenders interleave without tearing up to 1024 bytes on NTFS through that
-# runtime, which is where skell is tested; _skell_fit trims anything longer.
+# Cygwin turns one `echo` to this O_APPEND descriptor into one NtWriteFile at
+# FILE_WRITE_TO_END_OF_FILE. Tested NTFS writes stay intact through 1024 bytes;
+# _skell_fit limits longer records.
 function _skell_record --on-event fish_postexec
     set -l code $status
     test -n "$argv[1]"; or return
     string match -q ' *' -- $argv[1]; and return
 
-    # fish exposes no clock variable, and `date` would fork on every prompt.
-    # `path mtime` prints $HOME's modification time as an absolute epoch and
-    # `-R` prints its age in seconds, so the two sum to the current epoch
-    # whatever that time was.
+    # fish has no clock variable, and `date` would fork on every prompt. Add
+    # $HOME's modification time to its age to get the current epoch.
     set -l mtime
     set -l age
     set -l stamp
     path mtime $HOME | read mtime
     path mtime -R $HOME | read age
-    # An unstat-able $HOME leaves both empty, which would make `math` report a
-    # syntax error at every prompt.
+    # If fish cannot stat $HOME, skip the record instead of passing empty
+    # values to `math`.
     test -n "$mtime" -a -n "$age"; or return
     math -s0 $mtime + $age | read stamp
 
     set -l cmd (_skell_escape $argv[1] | string collect --allow-empty)
 
-    # A directory holding a tab or a newline would shift every field that
-    # follows it, so $PWD is escaped on the same terms as the command. The
-    # escaped form is cached: it changes far more rarely than once per command.
+    # Escape tabs and newlines in $PWD before writing the TSV fields. Cache the
+    # encoded value until the directory changes.
     if test "$PWD" != "$_skell_dir_raw"
         set -g _skell_dir_raw $PWD
         set -g _skell_dir (_skell_escape $PWD | string collect --allow-empty)
     end
 
-    # fish expands \t outside double quotes only, so each field is quoted on
-    # its own. The record and its newline leave in one `echo`: a second write
-    # would let another shell interleave between them.
+    # fish expands \t only outside double quotes. Quote each field separately,
+    # then append the record and newline with one `echo` to prevent interleaving.
     set -l record (_skell_fit "$stamp"\t"$_skell_dir"\t"$code"\tfish "$cmd" | string collect --allow-empty)
     echo -- $record >>$SKELL_HISTORY
 end

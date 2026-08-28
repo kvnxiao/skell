@@ -1,13 +1,12 @@
-# Codec test vectors: name, raw field, encoded field.
+# Codec vectors: name, raw field, encoded field.
 #
-# Both fields use %XX hex escapes for every byte below 0x20, for 0x5C and 0x7F,
-# and for %25 itself; nothing else is interpreted, so non-ASCII text appears
-# unescaped. Keeping every escape below 0x80 lets a reader build the bytes from
-# code points without knowing the file's encoding.
+# Both fields use %XX for bytes below 0x20, for 0x5C and 0x7F, and for %25.
+# Nothing else is interpreted. Non-ASCII text stays unescaped. All %XX escapes
+# are ASCII and can be decoded without knowing the file encoding.
 #
-# NUL is outside the store contract, so no vector holds one: no supported line
-# editor can produce it and it terminates the C strings gawk builds. Every
-# other byte below 0x20 and 0x7F must survive a round trip unchanged.
+# Supported line editors cannot produce NUL, and it terminates gawk's C strings.
+# NUL is outside the store contract. Every other byte below 0x20, plus 0x7F,
+# must survive a round trip unchanged.
 plain	git status	git status
 backslash	echo %5C	echo %5C%5C
 two-backslash	echo %5C%5C	echo %5C%5C%5C%5C

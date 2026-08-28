@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Round-trip every codec vector through share/codec.awk and check the fitter's
-# boundaries.
 # shellcheck source=tests/lib/harness.sh disable=SC2016
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/harness.sh"
 
@@ -9,8 +7,7 @@ codec="$SKELL_REPO_ROOT/share/codec.awk"
 out="$SKELL_SANDBOX/out"
 mkdir -p "$out"
 
-# The results go to files rather than through a command substitution, which
-# would strip a trailing newline from any vector that ends in one.
+# Command substitution would strip a trailing newline. Write results to files.
 while read -r name; do
   [ -n "$name" ] || continue
   gawk -v BINMODE=3 -f "$codec" -v RS='\0' \

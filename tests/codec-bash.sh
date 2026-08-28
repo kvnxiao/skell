@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Round-trip every codec vector through bash's own escape and decode, and check
-# the fitter's boundaries. bash reads its recording hook only in an interactive
-# shell, so the probe runs under `bash -i`.
+# bash loads its recording hook only in interactive shells. Run the probe under
+# `bash -i`.
 # shellcheck source=tests/lib/harness.sh disable=SC2016
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/harness.sh"
 

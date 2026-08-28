@@ -5,8 +5,8 @@ zmodload zsh/zutil
 
 typeset -gi _skell_comp_active=0
 
-# The zparseopts spec mirrors compadd's own option list, and
-# _skell_complete_apply replays every parsed flag verbatim.
+# _skell_complete_apply replays each parsed flag. Keep the zparseopts spec
+# aligned with compadd's option list.
 _skell_compadd() {
   setopt localoptions extended_glob
 
@@ -16,7 +16,7 @@ _skell_compadd() {
              i: S: s: I: x:=_mesg r: R: W: F: M+: E: q e Q n U C \
              J:=__ V:=__ a=__ l=__ k=__ o::=__ 1=__ 2=__
 
-  # With -O, -A or -D, compadd fills an array rather than offering a match.
+  # With -O, -A, or -D, compadd fills an array instead of offering a match.
   if (( $#_oad != 0 || ! _skell_comp_active )); then
     builtin compadd "$@"
     return
@@ -36,9 +36,8 @@ _skell_compadd() {
   local PREFIX="$PREFIX"
   local PREFIX_ORIG="$PREFIX"
 
-  # _approximate prepends an (#a<n>) glob flag to PREFIX, and a replayed
-  # compadd rejects the corrected word while the flag is still in PREFIX. -U
-  # skips the prefix check against the stripped PREFIX.
+  # _approximate adds an (#a<n>) glob flag to PREFIX. Remove it before replay.
+  # Add -U to skip compadd's prefix check after stripping the flag.
   if [[ $curcontext == (*approximate*|*correct*) ]]; then
     PREFIX=${PREFIX/#\(\#a[0-9]##\)/}
     PREFIX=${PREFIX/#\~\(\#a[0-9]##\)/~}
@@ -54,8 +53,8 @@ _skell_compadd() {
   done
   PREFIX="$PREFIX_ORIG"
 
-  # An empty prefix on a file match marks a candidate relative to the working
-  # directory, so a non-empty dir cannot stand in for the -f flag.
+  # For file matches, an empty prefix means the candidate is relative to the
+  # working directory. A non-empty directory cannot replace the -f flag.
   local dir=
   local -i isf=0
   if [[ -n $isfile ]]; then
@@ -77,7 +76,7 @@ _skell_compadd() {
   for (( i = 1; i <= $#__hits; i++ )); do
     w=$__hits[i] d=$__dscr[i]
     [[ -n $d ]] || d=$w
-    # A tab or newline in a description would shift or split its TSV row.
+    # Replace tabs and newlines that would break the TSV row.
     d=${d//[$'\n\t']/ }
     _skell_words+=$w
     _skell_dscrs+=$d
@@ -94,8 +93,7 @@ _skell_complete() {
   local -aU _skell_groups
   local -i ret=0
 
-  # The completer wraps descriptions at COLUMNS, so a wide value keeps every
-  # match on one line.
+  # Use a wide COLUMNS value to keep completer descriptions on one line.
   COLUMNS=500 _skell_main_complete "$@" || ret=$?
 
   local list_types=$options[list_types]
@@ -120,8 +118,8 @@ _skell_complete() {
       p=$_skell_dirs[i]${(Q)_skell_words[i]}
       if [[ -d $p ]]; then
         [[ $list_types == off ]] || d+=/
-        # The preview runs with its own working directory. MSYS zsh completes
-        # a drive-lettered path, which is absolute without a leading slash.
+        # The preview has its own working directory. Treat MSYS drive-letter
+        # paths as absolute even though they have no leading slash.
         [[ $p == (/|[a-zA-Z]:/)* ]] || p=$PWD/$p
       else
         p=
@@ -138,9 +136,8 @@ _skell_complete() {
   case $#ids in
     1) _skell_chosen=($ids[1]) ;;
     *)
-      # _approximate sets compstate[list] to force when it has corrections to
-      # show. Without that check, an unambiguous prefix returns early and the
-      # corrections never reach the menu.
+      # _approximate sets compstate[list] to force when corrections must reach
+      # the menu. Do not return early for an unambiguous prefix in that state.
       if [[ $compstate[insert] == *unambiguous ]] \
         && [[ -n $compstate[unambiguous] ]] \
         && [[ $compstate[unambiguous] != $compstate[quote]$IPREFIX$PREFIX$compstate[quote] ]] \
@@ -150,8 +147,8 @@ _skell_complete() {
         _skell_finish=1
         return 0
       fi
-      # An abandoned menu leaves _skell_chosen empty, and clearing compstate
-      # unconditionally keeps zsh from inserting or listing on its own.
+      # Clear compstate even when the menu is canceled to stop zsh from
+      # inserting or listing matches on its own.
       _skell_menu
       ;;
   esac
@@ -161,37 +158,35 @@ _skell_complete() {
   return $ret
 }
 
-# ids, disp and dirs are dynamically scoped from _skell_complete, alongside the
-# capture arrays. Each record is keyed by the candidate's index, so the preview
-# receives only that number and reads the rest out of the file.
+# ids, disp, dirs, and the capture arrays are dynamically scoped from
+# _skell_complete. The preview receives only a candidate index and reads the
+# remaining fields from the record file.
 _skell_menu() {
   local -i gw=0 i gi
   local g p
 
-  # A verbose `format` style makes group names long enough to crowd out the
-  # candidates.
+  # Cap verbose `format` values before they crowd out candidates.
   if (( $#_skell_groups > 1 )); then
     for g in $_skell_groups; do (( $#g > gw )) && gw=$#g; done
     (( gw > 20 )) && gw=20
     (( gw++ ))
   fi
 
-  # The record holds whatever the candidates expose about the filesystem, so it
-  # is created under a private umask rather than the caller's. zsh/init.zsh
-  # names the same path for its exit hook to remove.
+  # The record may contain filesystem paths. Create it under a private umask;
+  # the exit hook in zsh/init.zsh removes the same path.
   local rec=$_skell_complete_rec
   (umask 077; : > $rec)
   local -a lines=()
   local -i hasdir=0
   for (( i = 1; i <= $#ids; i++ )); do
     p=$dirs[i]
-    # A tab or newline in the path would shift every field that follows it.
+    # Drop paths with tabs or newlines that would break the TSV row.
     if [[ $p == *[$'\t\n']* ]]; then
       p=
     elif [[ -n $p ]]; then
       hasdir=1
-      # The preview quotes this path, and MSYS skips its POSIX-to-Windows argv
-      # conversion for any argument containing an apostrophe.
+      # The preview quotes this path. MSYS skips POSIX-to-Windows argument
+      # conversion when an argument contains an apostrophe.
       [[ $OSTYPE == (cygwin|msys)* ]] && p=${p/#\/(#b)([a-zA-Z])\//${match[1]:u}:/}
     fi
     g=
@@ -237,8 +232,8 @@ _skell_menu() {
   return 0
 }
 
-# Registered as a completion widget so the chosen words are the only matches in
-# a fresh completion context.
+# Register a completion widget to make the chosen words the only matches in a
+# new completion context.
 _skell_complete_apply() {
   local -i id
   local -A v
@@ -273,7 +268,7 @@ _skell_complete_widget() {
       zle _skell_complete_apply || ret=$?
     fi
   } always {
-    # An interrupt during sk unwinds past the rest of the widget.
+    # Restore terminal state even when an interrupt exits the widget early.
     _skell_comp_active=0
     echoti cnorm >/dev/tty 2>/dev/null
   }
@@ -284,8 +279,8 @@ _skell_complete_widget() {
 () {
   emulate -L zsh -o extended_glob
 
-  # Capturing skell's own widget and completer as the originals on a re-source
-  # would make each call recurse into itself.
+  # On re-source, keep the original widget instead of wrapping skell's wrapper
+  # and recursing.
   if (( ! $+_skell_orig_widget )); then
     typeset -g _skell_orig_widget="${${$(builtin bindkey '^I')##* }:-expand-or-complete}"
     local -a compinit_widgets=(
@@ -293,7 +288,7 @@ _skell_complete_widget() {
       expand-or-complete-prefix list-choices menu-complete
       menu-expand-or-complete reverse-menu-complete
     )
-    # Widget-wrapping plugins skip a dot-prefixed widget name.
+    # Use a dot-prefixed name that widget-wrapping plugins skip.
     if [[ $widgets[$_skell_orig_widget] == builtin ]] \
       && (( $compinit_widgets[(Ie)$_skell_orig_widget] )); then
       zle -C .skell-orig-$_skell_orig_widget .$_skell_orig_widget _main_complete
@@ -305,7 +300,7 @@ _skell_complete_widget() {
   zle -N _skell_complete_widget
   zle -C _skell_complete_apply complete-word _skell_complete_apply
 
-  # One compadd entry per row; grouping them would merge distinct matches.
+  # Grouping compadd entries merges distinct matches. Add one entry per row.
   zstyle ':completion:*' list-grouped false
   bindkey -M emacs '^I' _skell_complete_widget
   bindkey -M viins '^I' _skell_complete_widget
@@ -315,16 +310,15 @@ _skell_complete_widget() {
   if (( ! $+functions[_skell_main_complete] )); then
     functions[_skell_main_complete]=$functions[_main_complete]
     functions[_skell_approximate_orig]=$functions[_approximate]
-    # _approximate reaches past any compadd wrapper with `builtin compadd` to
-    # add the uncorrected string.
+    # Replace _approximate's `builtin compadd` call to let the wrapper capture
+    # the uncorrected string.
     functions[_skell_approximate_inner]="${functions[_approximate]//builtin[[:space:]]##compadd/_skell_compadd}"
   fi
 
   functions[compadd]=$functions[_skell_compadd]
   function _main_complete() { _skell_complete "$@" }
 
-  # _approximate defines the wrapper that places the (#a<n>) flag only when no
-  # compadd function exists.
+  # Let _approximate add its (#a<n>) flag while no compadd wrapper exists.
   function _approximate() {
     unfunction compadd
     {

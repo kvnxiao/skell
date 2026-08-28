@@ -1,11 +1,9 @@
 # shellcheck shell=bash
-# Exercise bash's codec against the vector files. Run under `bash -i` with
-# SKELL_VECTORS_DIR and SKELL_OUT_DIR set; each result is written to a file so
-# the driver compares bytes rather than terminal output.
+# Run under `bash -i` with SKELL_VECTORS_DIR and SKELL_OUT_DIR set. Write each
+# result to a file for bytewise comparison.
 
 . "$SKELL_ROOT/bash/skell.bash"
-# This probe measures the codec alone, so the recording hook is unhooked to
-# keep the driver's own commands out of the store.
+# Disable the recording hook to keep the driver's commands out of the store.
 PROMPT_COMMAND=
 
 slurp() {

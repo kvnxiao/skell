@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Run every suite whose shell this machine has, and report what was skipped.
-#
-# A missing shell is skipped rather than failed: skell supports four shells and
-# a contributor is not expected to install all of them. Nothing here reads the
-# developer's own store; each suite builds an isolated one.
+# Run suites for installed shells. Report missing shells as skipped, and use an
+# isolated store in every suite.
 
 set -uo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname -- "$here")
 
-# PowerShell resolves the mixed form on every platform the POSIX shells do.
+# Use a path form that PowerShell and the POSIX shells both resolve.
 winpath() {
   if command -v cygpath >/dev/null 2>&1; then
     cygpath -m -- "$1"

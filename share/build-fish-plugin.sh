@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Assemble skell's fisher-installable layout in the directory named by $1.
+# Build skell's fisher plugin tree in $1.
 #
-# fisher installs only a plugin's root conf.d, functions, completions, and
-# themes, so the awk scripts go under functions/skell-share, which fisher
-# copies whole and fish does not autoload from.
+# fisher copies only root conf.d, functions, completions, and themes
+# directories. Store the awk scripts under functions/skell-share; fish does
+# not autoload that subdirectory.
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ if [ -e "$out" ] && [ -n "$(ls -A -- "$out")" ]; then
   exit 1
 fi
 
-# A half-written tree would fail the non-empty check on the next run.
+# Remove partial output to let retries pass the non-empty check.
 trap 'rm -rf -- "$out"' ERR
 
 mkdir -p "$out/conf.d" "$out/functions/skell-share"
@@ -28,13 +28,13 @@ cat > "$out/README.md" <<'EOF'
 # skell for fish
 
 One command history for bash, fish, PowerShell, and zsh. This branch is built
-from [kvnxiao/skell](https://github.com/kvnxiao/skell); open issues and pull
+from [kvnxiao/skell](https://github.com/kvnxiao/skell). Open issues and pull
 requests against `main`.
 
 ```fish
 fisher install kvnxiao/skell@fish-releases
 ```
 
-skell needs [skim](https://github.com/skim-rs/skim) and `gawk` on `PATH`.
-`ctrl-r` searches the store, which every skell shell shares.
+Skell needs [skim](https://github.com/skim-rs/skim) and `gawk` on `PATH`.
+`Ctrl+R` searches the store shared by every skell shell.
 EOF

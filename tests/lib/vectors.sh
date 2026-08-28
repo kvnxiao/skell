@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Expand tests/lib/vectors.tsv into file pairs under $1: <name>.raw holds the
-# bytes a line editor passes the recording hook, <name>.enc holds the field
-# every writer must produce from those bytes.
+# Expand tests/lib/vectors.tsv under $1. Each .raw file contains line-editor
+# input, and its .enc file contains the required store encoding.
 set -euo pipefail
 
 out=${1:?usage: vectors.sh DIR}
@@ -9,8 +8,7 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 rm -rf -- "$out"
 mkdir -p "$out"
 
-# gawk's %c emits a character in the current locale, so the C locale turns a
-# hex escape into the single byte the vector names.
+# Use the C locale to make gawk's %c emit one byte for each hex escape.
 LC_ALL=C gawk -v out="$out" '
 function unhex(s,   r, i, c, n) {
   r = ""
