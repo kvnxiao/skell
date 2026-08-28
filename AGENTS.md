@@ -86,9 +86,10 @@ bash tests/run-all.sh
 
 `tests/run-all.sh` covers the codec in all five implementations, the record
 fitter's boundaries, each recording hook's output, the files fish loads from
-the built plugin, the atuin importer's failure paths, store permissions, and the
-PowerShell module's lifecycle. It skips suites for unavailable shells and names
-each skipped suite.
+the built plugin, fish's rewrite of an inherited Windows store path, the atuin
+importer's failure paths, store permissions, and the PowerShell module's
+lifecycle. It skips suites for unavailable shells and names each skipped suite.
+When MSYS2 is unavailable, `tests/path-fish.sh` reports a skip.
 
 No suite drives a real line editor. Bash records under `bash -i`; zsh and fish
 are called at the hook boundary with the arguments their editors pass because

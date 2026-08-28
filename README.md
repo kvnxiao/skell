@@ -155,7 +155,12 @@ long enough to leave no room for the command, the directory is stored as
 `unknown` and the command is kept whole.
 
 Set `SKELL_HISTORY` to move the file. Set `SKELL_DATA_DIR` to move its
-containing directory.
+containing directory. On Windows, bash, fish, and zsh use MSYS2 paths; PowerShell
+uses a native Windows path.
+
+Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it.
+Skell rewrites the drive-letter path to its mounted MSYS2 path before opening
+the store. Bash and zsh append using their configured paths.
 
 ### Who can read it
 

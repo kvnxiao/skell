@@ -12,6 +12,13 @@ if not set -q SKELL_DATA_DIR
 end
 set -q SKELL_HISTORY; or set -gx SKELL_HISTORY $SKELL_DATA_DIR/history.tsv
 
+# Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it.
+# Rewrite the path before opening the store.
+if test -e /usr/bin/msys-2.0.dll
+    set -gx SKELL_DATA_DIR (_skell_msys_path $SKELL_DATA_DIR)
+    set -gx SKELL_HISTORY (_skell_msys_path $SKELL_HISTORY)
+end
+
 # The store contains the user's command history. Create new data directories
 # and stores under a private umask.
 if not test -d $SKELL_DATA_DIR; or not test -e $SKELL_HISTORY
