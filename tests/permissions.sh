@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Check that each shell creates the store where only its owner can read it.
-#
-# A POSIX mode is only meaningful where the filesystem honours it. Cygwin and
-# MSYS2 mount NTFS with `noacl`, which discards the umask entirely: a probe
-# created under `umask 077` is 755. The mode assertions therefore run only where
-# a probe proves they apply, and the Windows store is covered by the ACL the
-# PowerShell module sets instead.
+# POSIX modes apply only when the filesystem honors them. Cygwin and MSYS2
+# mount NTFS with `noacl`, which discards the umask. Run mode assertions only
+# when a probe confirms support; PowerShell tests the Windows ACL separately.
 # shellcheck source=tests/lib/harness.sh disable=SC2016
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/harness.sh"
 
@@ -30,8 +26,7 @@ assert_private() {
   skell_eq "$label: store is 600" 600 "$(stat -c '%a' "$file")"
 }
 
-# Each shell is started against a store directory that does not exist yet, so
-# the assertions cover the path that creates it.
+# Start each shell with a missing store directory to test directory creation.
 run_shell() {
   local name=$1 data="$SKELL_SANDBOX/$1"
   rm -rf -- "$data"
@@ -43,8 +38,8 @@ run_shell() {
       ;;
     zsh)
       {
-        # An MSYS2 shell that an agent starts inherits the agent's PATH, which
-        # resolves mkdir to Git-for-Windows and its own /tmp.
+        # The inherited PATH resolves mkdir and /tmp through Git for Windows.
+        # Prepend MSYS2 tools.
         printf 'export PATH=/usr/bin:/bin:$PATH\n'
         printf 'export SKELL_ROOT=%s\n' "$SKELL_REPO_WIN"
         printf 'export SKELL_DATA_DIR=%s/zsh\n' "$SKELL_SANDBOX_MSYS"
@@ -62,8 +57,8 @@ run_shell() {
         printf 'set -p fish_function_path %s/fish/functions\n' "$SKELL_REPO_WIN"
         printf 'source %s/fish/conf.d/skell.fish\n' "$SKELL_REPO_WIN"
       } > "$SKELL_SANDBOX/perm.fish"
-      # fish/conf.d/skell.fish returns early in a non-interactive shell, so an
-      # interactive fish sources the fixture to reach the store-creation block.
+      # fish/conf.d/skell.fish returns in a non-interactive shell. Source the
+      # fixture from an interactive shell to create the store.
       printf 'source %s/perm.fish\nexit\n' "$SKELL_SANDBOX_MSYS" | fish --no-config -i >/dev/null 2>&1
       ;;
   esac
@@ -81,10 +76,8 @@ for shell in bash zsh fish; do
   assert_private "$shell" "$data" "$data/history.tsv"
 done
 
-# On Windows the module replaces the inherited descriptor with a single entry
-# for the current account, a protection the umask cannot provide. On Linux and
-# macOS it sets the mode the POSIX shells set; README promises that branch, so
-# it is measured rather than skipped.
+# On Windows, PowerShell replaces inherited ACLs with one entry for the current
+# account. On Unix, it sets the same modes as the shell hooks. Verify both paths.
 if command -v pwsh >/dev/null 2>&1; then
   rm -rf -- "$SKELL_SANDBOX/pwsh"
   result=$(SKELL_DATA_DIR="$SKELL_SANDBOX_WIN/pwsh" \

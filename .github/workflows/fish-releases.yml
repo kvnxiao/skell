@@ -29,16 +29,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fish gawk
 
-      # The ci workflow runs on the same push without blocking this one, so
-      # the plugin suite runs again in this job.
+      # CI runs independently. This job therefore reruns the plugin suite.
       - name: Check the built plugin
         run: bash tests/plugin-fish.sh
 
       - name: Assemble the plugin
         run: bash share/build-fish-plugin.sh "$RUNNER_TEMP/fish-releases"
 
-      # fisher fetches a tarball of the ref rather than cloning and does not
-      # read history, so each run rebuilds the branch as a single commit.
+      # fisher downloads a ref tarball without Git history. Rebuild the branch
+      # as one commit on every run.
       - name: Publish the branch
         env:
           GH_TOKEN: ${{ github.token }}

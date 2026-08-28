@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Exercise the atuin importer against a stub atuin, including the paths where
-# it must leave the target untouched.
 # shellcheck source=tests/lib/harness.sh disable=SC2016
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/harness.sh"
 
@@ -8,7 +6,7 @@ migrate="$SKELL_REPO_ROOT/share/migrate-atuin.sh"
 stub_dir="$SKELL_SANDBOX/bin"
 mkdir -p "$stub_dir"
 
-# The stub stands in for atuin so the developer's own history is never read.
+# Use a stub to keep the test from reading the developer's history.
 cat > "$stub_dir/atuin" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SKELL_STUB_LOG"
@@ -86,8 +84,8 @@ skell_false 'refused undateable import writes no store' test -e "$target.bad"
 skell_true 'refused undateable import says why' \
   grep -q 'did not parse' "$SKELL_SANDBOX/migrate.err"
 
-# atuin renders {time} with an ISO separator on some versions and a UTC offset
-# on others; both have to convert rather than being skipped.
+# atuin may use an ISO separator or append a UTC offset. Both forms must
+# convert.
 for mode in isotime offsettime; do
   SKELL_STUB_MODE=$mode
   rm -f "$target.$mode"

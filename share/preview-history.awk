@@ -1,9 +1,8 @@
-# Render one ranked record for skim's preview pane. Pass -v n=<id>, where id is
-# the first field of the line skim is showing. Load share/codec.awk first.
+# Render one ranked record for skim. Pass its first field as -v n=<id>, and
+# load share/codec.awk first.
 #
-# skim substitutes its placeholders raw, and on Windows it runs the preview
-# through cmd.exe, so the only value crossing that boundary is the numeric id.
-# Everything printed here is read back out of the rank file.
+# On Windows, skim sends raw placeholder text through cmd.exe. Only the numeric
+# ID crosses that boundary; all other values come from the rank file.
 
 function ago(seconds) {
   if (seconds < 60) return "just now"

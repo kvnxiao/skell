@@ -8,9 +8,8 @@
 : ${SKELL_HISTORY:=$SKELL_DATA_DIR/history.tsv}
 export SKELL_ROOT SKELL_DATA_DIR SKELL_HISTORY
 
-# The store holds every command the user runs. Creating the directory and the
-# file here under a private umask keeps the first append from creating the store
-# at the caller's.
+# The store contains the user's command history. Create new data directories
+# and stores under a private umask.
 if [[ ! -d $SKELL_DATA_DIR ]]; then
   (umask 077; mkdir -p $SKELL_DATA_DIR) || return 0
 fi
@@ -19,9 +18,8 @@ fi
 zmodload zsh/datetime
 autoload -Uz add-zsh-hook
 
-# Each zsh history option stands on its own, so this one leaves the user's
-# other exclusions in place. _skell_precmd checks the leading space again, so
-# unsetting the option later cannot put the command in the store.
+# Add HIST_IGNORE_SPACE without changing other history options. _skell_precmd
+# also checks the raw line in case the option changes later.
 setopt HIST_IGNORE_SPACE
 
 _skell_rank=$SKELL_DATA_DIR/rank-zsh-$$.tsv
@@ -37,14 +35,12 @@ _skell_escape() {
   REPLY=${s//$'\r'/\\r}
 }
 
-# Concurrent appenders interleave without tearing up to 1024 bytes on NTFS
-# through the Cygwin and MSYS2 runtimes, which is where skell is tested. A
-# record holding any non-ASCII code point is capped at a quarter of the budget,
-# since four bytes is the widest UTF-8 encoding and a byte count would need a
-# second pass. ${#var} counts UTF-16 units under Cygwin's 16-bit wchar_t, as
-# bash and PowerShell do, while gawk and fish count code points; either count
-# stays inside 1000 bytes, so a command outside the BMP is cut at a different
-# point depending on which shell recorded it.
+# On NTFS, the tested Cygwin and MSYS2 runtimes append up to 1024 bytes without
+# interleaving. Records use a 1000-byte budget. Because each UTF-8 code point
+# may use four bytes, records with non-ASCII text use a 250-character limit
+# without another counting pass. Cygwin zsh counts UTF-16 units, while gawk
+# and fish count code points. Both stay within the budget, but they may trim an
+# astral command at different positions.
 _skell_fit() {
   local head=$1 cmd=$2 record
   local -i limit=1000
@@ -61,8 +57,8 @@ _skell_fit() {
     record="$head"$'\t'"$cmd"
     limit=1000
     [[ $record == *[^[:ascii:]]* ]] && limit=250
-    # Dropping the directory can be enough on its own, and a record that now
-    # fits is whole: marking it elided would claim a cut that never happened.
+    # If replacing the directory makes the whole command fit, return the
+    # record without an elision marker.
     if (( ${#record} <= limit )); then
       REPLY=$record
       return 0
@@ -71,8 +67,7 @@ _skell_fit() {
     (( keep < 0 )) && keep=0
   fi
   cmd=${cmd[1,keep]}
-  # An even run of trailing backslashes is whole escape pairs; an odd run means
-  # the cut landed inside one, so the last backslash goes.
+  # If the cut leaves an odd run of backslashes, drop the incomplete escape.
   local -i run=0 i=${#cmd}
   while (( i > 0 )) && [[ ${cmd[i]} == '\' ]]; do (( run++, i-- )); done
   (( run % 2 )) && cmd=${cmd[1,-2]}
@@ -85,9 +80,8 @@ _skell_preexec() { _skell_pending=$1 }
 
 _skell_precmd() {
   local -i code=$?
-  # The user's options reach this hook: SH_WORD_SPLIT would split the command
-  # across the arguments below and NO_UNSET would abort on _skell_pending, so
-  # the hook runs under zsh's own defaults.
+  # User-set SH_WORD_SPLIT would split the command, and NO_UNSET would abort on
+  # _skell_pending. Run the hook under zsh defaults.
   emulate -L zsh
   [[ -n ${_skell_pending-} ]] || return 0
   local raw=$_skell_pending
@@ -97,8 +91,7 @@ _skell_precmd() {
   local REPLY cmd dir
   _skell_escape "$raw"
   cmd=$REPLY
-  # A directory holding a tab or a newline would shift every field that follows
-  # it, so it is escaped on the same terms as the command.
+  # Escape tabs and newlines in the directory before writing the TSV fields.
   _skell_escape "$PWD"
   dir=$REPLY
 
@@ -109,10 +102,8 @@ _skell_precmd() {
 add-zsh-hook preexec _skell_preexec
 add-zsh-hook precmd _skell_precmd
 
-# The encoded backslash pair is consumed before any other escape is decoded, so
-# a byte the store holds literally can never be read as an escape introducer. A
-# decoder that swapped in a placeholder byte would rewrite that byte when it
-# restored the backslashes.
+# Decode doubled backslashes before other escapes. A placeholder byte could
+# collide with literal store content.
 _skell_unescape() {
   local s=$1 out= raw dec
   while :; do
@@ -155,8 +146,8 @@ _skell_history_widget() {
     return 0
   fi
 
-  # The `p` flag expands \t in the separator to a tab. Fields past the sixth
-  # are rejoined: a hand-edited store can hold a literal tab there.
+  # The `p` flag turns \t into a separator. Rejoin extra fields from a
+  # hand-edited store that contains literal tabs.
   _skell_unescape "${(pj:\t:)${(@ps:\t:)chosen[2]}[6,-1]}"
   BUFFER=$REPLY
   CURSOR=${#BUFFER}
@@ -170,6 +161,5 @@ _skell_history_widget() {
 zle -N _skell_history_widget
 bindkey '^R' _skell_history_widget
 
-# The completion menu binds Tab, so it must load after compinit and before any
-# widget-wrapping plugin.
+# Load the Tab binding after compinit and before widget-wrapping plugins.
 source $SKELL_ROOT/zsh/completion.zsh

@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Round-trip every codec vector through zsh's own escape and decode, and check
-# the fitter's boundaries.
-#
-# zsh reads its hooks only in an interactive shell and does not inherit the
-# environment this bash exports, so the probe is piped into `zsh -f -i` behind a
-# prelude that sets the paths in MSYS2's own spelling. The probe rebuilds each
-# vector from its %XX spec, because neither a file read nor argv crosses the
-# runtime boundary without rewriting the bytes the codec is under test for.
+# zsh loads hooks only in interactive shells and cannot inherit this bash's
+# environment. Pipe the probe into `zsh -f -i` after a prelude sets MSYS2 paths.
+# File reads and arguments can change bytes across the runtime boundary.
+# Rebuild vectors from their %XX specs.
 # shellcheck source=tests/lib/harness.sh disable=SC2016
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/harness.sh"
 
@@ -14,8 +10,8 @@ out="$SKELL_SANDBOX/out"
 mkdir -p "$out"
 
 {
-  # An MSYS2 zsh that an agent starts inherits the agent's PATH, which resolves
-  # coreutils to Git-for-Windows and its own /tmp.
+  # The inherited PATH resolves coreutils and /tmp through Git for Windows.
+  # Prepend MSYS2 tools.
   printf 'export PATH=/usr/bin:/bin:$PATH\n'
   printf 'export SKELL_ROOT=%s\n' "$SKELL_REPO_WIN"
   printf 'export SKELL_DATA_DIR=%s/data\n' "$SKELL_SANDBOX_MSYS"

@@ -1,8 +1,8 @@
-# Render one completion candidate for skim's preview pane. The records file is
-# named on the command line; -v n=<id> picks the row whose first field is id.
+# Render one completion candidate for skim. Pass the records file on the
+# command line and use -v n=<id> to select its row.
 #
-# skim substitutes its placeholders raw and on Windows runs the preview through
-# cmd.exe, so only the numeric id crosses that boundary.
+# On Windows, skim sends raw placeholder text through cmd.exe. Only the numeric
+# ID crosses that boundary.
 
 function shquote(s,   out, i, c, esc) {
   esc = SQ "\\" SQ SQ

@@ -1,20 +1,19 @@
-# zsh compiles a sourced file beside it, and a .zwc newer than its source is
-# read in preference to it, so a stale one silently runs the old code.
+# When a .zwc is newer than its source, zsh loads it instead. A stale file can
+# therefore run old code.
 *.zwc
 
-# Pointing SKELL_DATA_DIR at a clone puts the store here instead of under
-# $XDG_DATA_HOME. It holds every command the shells have recorded.
+# SKELL_DATA_DIR may point at the clone. The store contains every recorded
+# command.
 history.tsv
 
-# One ranked dump, completion record, or bash scratch file per process, named
-# for the shell and its process id. The shells remove their own on exit; a
-# killed shell leaves them behind.
+# Each process writes its ranked dump, completion record, or bash scratch file
+# under the shell name and process ID. A killed shell may leave the file behind.
 rank-*-*.tsv
 complete-*-*.tsv
 scratch-*-*.hist
 
-# migrate-atuin.sh stages a conversion beside its target and renames it only
-# once the whole file validates. A run killed mid-conversion leaves the stage.
+# migrate-atuin.sh stages a conversion beside its target. A killed run may
+# leave the staged file behind.
 history.tsv.*
 
 # macOS and Windows write these into any directory a file manager opens.

@@ -1,12 +1,11 @@
 function _skell_fit --description "Trim a history record to the atomic-append ceiling" -a head cmd
-    # Concurrent appenders interleave without tearing up to 1024 bytes on NTFS
-    # through the Cygwin and MSYS2 runtimes, which is where skell is tested. A
-    # record holding any non-ASCII code point is capped at a quarter of the
-    # budget, since four bytes is the widest UTF-8 encoding and a byte count
-    # would cost a fork. `string length` counts code points, as gawk does,
-    # while bash, zsh, and PowerShell count UTF-16 units; either count stays
-    # inside 1000 bytes, so a command outside the BMP is cut at a different
-    # point depending on which shell recorded it.
+    # On NTFS, the tested Cygwin and MSYS2 runtimes append up to 1024 bytes
+    # without interleaving. Records use a 1000-byte budget. Because each UTF-8
+    # code point may use four bytes, records with non-ASCII text use a
+    # 250-character limit without a byte-counting fork. fish and gawk count code
+    # points, while bash, zsh, and PowerShell count UTF-16 units. Both stay
+    # within the budget, but they may trim an astral command at different
+    # positions.
     set -l record $head\t$cmd
     set -l limit 1000
     if string match -qr '[^\x00-\x7F]' -- $record
@@ -27,9 +26,8 @@ function _skell_fit --description "Trim a history record to the atomic-append ce
         if string match -qr '[^\x00-\x7F]' -- $record
             set limit 250
         end
-        # Dropping the directory can be enough on its own, and a record that
-        # now fits is whole: marking it elided would claim a cut that never
-        # happened.
+        # If replacing the directory makes the whole command fit, return the
+        # record without an elision marker.
         if test (string length -- $record) -le $limit
             printf '%s' $record
             return
@@ -40,8 +38,7 @@ function _skell_fit --description "Trim a history record to the atomic-append ce
 
     set -l bs \x5c
     set -l kept (string sub -l $keep -- $cmd | string collect --allow-empty)
-    # An even run of trailing backslashes is whole escape pairs; an odd run
-    # means the cut landed inside one, so the last backslash goes.
+    # If the cut leaves an odd run of backslashes, drop the incomplete escape.
     set -l run (string match -gr "($bs$bs+)\$" -- $kept | string collect --allow-empty)
     if test (math (string length -- $run) % 2) -eq 1
         set kept (string sub -e -1 -- $kept | string collect --allow-empty)

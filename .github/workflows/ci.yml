@@ -9,10 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  # The POSIX shells run on all three platforms. The Windows runner image
-  # supplies only bash and PowerShell, so tests/run-all.sh skips zsh and fish
-  # there and says so; the PowerShell suites cover the Windows-specific store
-  # behavior.
+  # The Windows image lacks zsh and fish; tests/run-all.sh skips those suites.
+  # The PowerShell suites cover Windows store behavior.
   shells:
     strategy:
       fail-fast: false
@@ -39,8 +37,8 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install gawk --no-progress -y
 
-      # An `&&` chain would make a missing shell the step's exit status, so each
-      # optional check sits inside an `if`.
+      # An `&&` chain would fail when an optional shell is missing. Use an `if`
+      # for each shell check.
       - name: Check syntax
         run: |
           set -e

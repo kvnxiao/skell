@@ -15,10 +15,9 @@ Usage: migrate-atuin.sh [--append] [--dry-run] [--force] [--output PATH]
   --output     Write somewhere other than $SKELL_HISTORY.
 
 Records are written oldest first, matching the order the shells append in.
-The target is replaced only after the whole conversion validates, so a failed
-run leaves it byte for byte as it was. Close the shells that record to the
-store first: this rewrites the file rather than appending to it, and a
-concurrent append would be lost.
+The target is replaced only after validation. If conversion fails, the target
+stays byte for byte unchanged. A concurrent append would be lost. Close shells
+that record to the store before running the migration.
 EOF
 }
 
@@ -34,8 +33,6 @@ while [ $# -gt 0 ]; do
     --dry-run) dry_run=1 ;;
     --force) force=1 ;;
     --output)
-      # Consuming $1 blindly would report an unbound variable rather than the
-      # missing argument.
       if [ $# -lt 2 ]; then
         echo 'migrate-atuin: --output needs a path' >&2
         exit 2
@@ -74,13 +71,10 @@ if [ "$dry_run" -eq 0 ] && [ "$force" -eq 0 ]; then
   esac
 fi
 
-# A `workspaces = true` config narrows `history list` to the git repository that
-# the export runs in, so ATUIN_FILTER_MODE=global overrides it; running in a
-# fresh repository would otherwise export nothing. --print0 keeps a multiline
-# command in one record, and --reverse=true pins the oldest-first order rather
-# than inheriting whatever the installed atuin defaults to. atuin prints {time}
-# in the local zone and mktime() reads it back in the same zone. BINMODE=3 stops
-# gawk from rewriting a CRLF pair in a command as a bare newline.
+# atuin's workspace setting can filter history to the current Git repository.
+# Force a global export. NUL separators keep multiline commands in one
+# record, and --reverse=true fixes oldest-first order. atuin and mktime() use
+# the local time zone. BINMODE=3 preserves CRLF in commands.
 convert() {
   ATUIN_FILTER_MODE=global \
     atuin history list --reverse=true --print0 \
@@ -88,9 +82,8 @@ convert() {
     | gawk -v BINMODE=3 -v RS='\0' -f "$here/codec.awk" -f "$here/migrate-atuin.awk"
 }
 
-# gawk's length() and substr() are byte-based outside a UTF-8 locale, so the
-# record cut would land mid-character and write invalid UTF-8 that
-# validate_structure cannot see.
+# Outside a UTF-8 locale, gawk may cut a record inside a multibyte character.
+# The structure check cannot detect invalid UTF-8.
 case ${LC_ALL:-${LC_CTYPE:-${LANG:-}}} in
   *[Uu][Tt][Ff]8* | *[Uu][Tt][Ff]-8*) ;;
   *)
@@ -98,11 +91,8 @@ case ${LC_ALL:-${LC_CTYPE:-${LANG:-}}} in
     ;;
 esac
 
-# Every record must hold the five contract fields and stay inside the append
-# budget, or the store would be unreadable in ways the shells cannot repair.
-# LC_ALL=C makes gawk's length() count bytes, which is the budget the atomic
-# append actually has; counting characters would pass a 1000-character record
-# holding up to 4000 bytes.
+# Validate the five-field format and 1000-byte record budget. LC_ALL=C makes
+# gawk count bytes instead of characters.
 validate_structure() {
   LC_ALL=C gawk -v BINMODE=3 -F'\t' -e '
     NF != 5 { printf("migrate-atuin: line %d holds %d fields\n", NR, NF) > "/dev/stderr"; bad = 1 }
@@ -112,10 +102,8 @@ validate_structure() {
   ' "$1"
 }
 
-# Validating the conversion alone pins the oldest-first order against a change
-# in atuin's own default. An existing store is exempt: importing history that
-# predates it is a legitimate reason for the epochs to step backwards at the
-# join.
+# Validate oldest-first order only in converted records. When appending,
+# imported history may predate the existing store.
 validate_order() {
   gawk -v BINMODE=3 -F'\t' -e '
     $1 < last { printf("migrate-atuin: converted line %d goes back in time\n", NR) > "/dev/stderr"; bad = 1 }
@@ -136,8 +124,8 @@ fi
 
 mkdir -p "$(dirname "$output")"
 
-# Both temporary files sit beside the target so the replacement is a rename
-# within one filesystem rather than a copy that can half-succeed.
+# Create temporary files beside the store to publish the result with one
+# filesystem rename.
 converted=$(mktemp -- "$output.XXXXXX") || exit 1
 staged=
 trap 'rm -f -- "$converted" ${staged:+"$staged"}' EXIT
@@ -147,12 +135,10 @@ chmod 600 "$converted" "$staged"
 convert > "$converted"
 validate_order "$converted"
 
-# In append mode the existing records are copied in first, so the rename
-# publishes one consistent store rather than a file built up in place.
+# Build append mode in the staged file and publish it with one rename.
 if [ "$append" -eq 1 ] && [ -e "$output" ]; then
   cat -- "$output" > "$staged"
-  # A store whose last line lost its newline would splice into the first
-  # imported record.
+  # If the store lacks a final newline, add one before the imported records.
   if [ -s "$staged" ] && [ "$(tail -c 1 -- "$staged" | wc -l)" -eq 0 ]; then
     printf '\n' >> "$staged"
   fi
@@ -161,8 +147,7 @@ fi
 cat -- "$converted" >> "$staged"
 validate_structure "$staged"
 
-# Where the target already exists, its own permissions win over the temporary
-# file's, so an existing store keeps whatever the user set on it.
+# Preserve permissions the user set on an existing store.
 if [ -e "$output" ]; then
   chmod --reference="$output" -- "$staged" 2>/dev/null || true
 fi

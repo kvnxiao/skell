@@ -1,8 +1,6 @@
 #!/usr/bin/env pwsh
-# Round-trip every codec vector through the PowerShell module's escape and
-# decode, and check the fitter's boundaries. Vectors are rebuilt from their %XX
-# specs so the comparison does not depend on how a file read crosses a runtime
-# boundary.
+# File reads across runtimes may change the bytes under test. Rebuild vectors
+# from their %XX specs.
 
 param(
     [Parameter(Mandatory)][string]$VectorsTsv,

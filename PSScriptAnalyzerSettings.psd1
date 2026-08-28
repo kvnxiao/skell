@@ -1,12 +1,11 @@
 @{
     ExcludeRules = @(
-        # skell requires PowerShell 7, which reads a source file as UTF-8
-        # without a byte order mark. The elision marker in the decoder is the
-        # only non-ASCII text in the module.
+        # PowerShell 7 reads UTF-8 source without a byte order mark. The
+        # decoder's elision marker is the module's only non-ASCII text.
         'PSUseBOMForUnicodeEncodedFile',
 
-        # The module exports no cmdlets. Its functions are reachable from the
-        # prompt wrapper and the test suite, neither of which reads Get-Help.
+        # The module exports functions instead of cmdlets. The prompt wrapper
+        # and test suite call them without Get-Help.
         'PSProvideCommentHelp'
     )
 }
