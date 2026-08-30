@@ -20,13 +20,15 @@ $1 != n { next }
 
 {
   if ($2 == "") {
-    print $4
+    text = $4
+    for (f = 5; f <= NF; f++) text = text FS $f
+    print skell_visible(text)
     exit
   }
   q = shquote($2)
-  cmd = "if command -v lsd >/dev/null 2>&1; then lsd -1 --color=always -- " q \
+  cmd = "if command -v lsd >/dev/null 2>&1; then lsd -1 --color=never -- " q \
         "; else ls -1 -- " q "; fi 2>&1"
-  while ((cmd | getline line) > 0) print line
+  while ((cmd | getline line) > 0) print skell_visible(line)
   close(cmd)
   exit
 }

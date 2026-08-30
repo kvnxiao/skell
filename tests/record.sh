@@ -20,11 +20,13 @@ assert_store() {
 
 bash_store="$SKELL_SANDBOX/bash.tsv"
 bash_data="$SKELL_SANDBOX/bash-data"
+bash_exit_marker="$SKELL_SANDBOX/bash-exit-trap"
 mkdir -p "$bash_data"
 cat > "$SKELL_SANDBOX/rc.bash" <<RCEOF
 SKELL_ROOT=$SKELL_REPO_ROOT
 SKELL_DATA_DIR=$bash_data
 SKELL_HISTORY=$bash_store
+trap 'printf preserved > "$bash_exit_marker"' EXIT
 . "\$SKELL_ROOT/bash/skell.bash"
 RCEOF
 
@@ -52,6 +54,9 @@ else
   skell_false 'bash excludes the leading-space command' grep -q 'excluded' "$bash_store"
   skell_eq 'bash records an absolute directory' 1 \
     "$(gawk -F'\t' -e 'NR == 1 && $2 ~ /^(\/|[A-Za-z]:)/ { print 1 }' "$bash_store")"
+  skell_eq 'bash preserves an existing EXIT trap' preserved "$(skell_slurp "$bash_exit_marker")"
+  skell_false 'bash clears command text from its scratch file' \
+    gawk 'length($0) { found=1 } END { exit !found }' "$bash_data"/scratch-bash-*.hist
 fi
 
 zsh_store="$SKELL_SANDBOX/zsh.tsv"

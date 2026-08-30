@@ -30,7 +30,8 @@ if not test -d $SKELL_DATA_DIR; or not test -e $SKELL_HISTORY
 end
 
 function _skell_exit --on-event fish_exit
-    command rm -f -- $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv
+    command rm -f -- $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv \
+        $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv
 end
 
 # Cygwin turns one `echo` to this O_APPEND descriptor into one NtWriteFile at

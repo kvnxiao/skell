@@ -3,19 +3,31 @@
 
 BEGIN { FS = "\t" }
 
-NF < 4 { next }
+NF < 4 { malformed++; next }
 
 {
   stamp = $1; dir = $2; code = $3; cmd = $4
   # A command holding a literal tab is split across the trailing fields.
   for (f = 5; f <= NF; f++) cmd = cmd FS $f
 
-  # Normalize ISO separators and remove UTC offsets before mktime(), which
-  # accepts six space-separated local-time fields.
+  # Normalize ISO separators before mktime(), which accepts six
+  # space-separated fields. Offset timestamps are parsed as UTC and adjusted
+  # to preserve their absolute time.
+  utc = 0
+  offset = 0
+  if (match(stamp, /([+-])([0-9][0-9]):?([0-9][0-9])$/, zone)) {
+    offset = (zone[1] == "-" ? -1 : 1) * (zone[2] * 3600 + zone[3] * 60)
+    stamp = substr(stamp, 1, RSTART - 1)
+    utc = 1
+  } else if (stamp ~ /[Zz]$/) {
+    sub(/[Zz]$/, "", stamp)
+    utc = 1
+  }
+  sub(/[[:space:]]+$/, "", stamp)
   sub(/[Tt]/, " ", stamp)
-  sub(/[+-][0-9][0-9]:?[0-9][0-9]$/, "", stamp)
+  sub(/\.[0-9]+$/, "", stamp)
   gsub(/[-:]/, " ", stamp)
-  epoch = mktime(stamp)
+  epoch = utc ? mktime(stamp, 1) - offset : mktime(stamp)
   if (epoch < 0) { skipped++; next }
 
   # Normalize Windows drive paths to the MSYS2 form used by shell writers.
@@ -30,12 +42,17 @@ NF < 4 { next }
   written++
 }
 
-# If every timestamp fails to parse, reject the conversion instead of
-# publishing an empty store.
+# Reject malformed fields or timestamps before the migration publishes a
+# partial store.
 END {
-  printf("migrate-atuin: converted %d records, skipped %d\n", written, skipped) > "/dev/stderr"
-  if (written == 0 && skipped > 0) {
-    printf("migrate-atuin: every record was skipped; atuin's {time} format did not parse\n") > "/dev/stderr"
+  printf("migrate-atuin: converted %d records, skipped %d, malformed %d\n",
+         written, skipped, malformed) > "/dev/stderr"
+  if (malformed > 0) {
+    printf("migrate-atuin: malformed records do not contain all four export fields\n") > "/dev/stderr"
+    exit 1
+  }
+  if (skipped > 0) {
+    printf("migrate-atuin: %d timestamps did not parse\n", skipped) > "/dev/stderr"
     exit 1
   }
 }

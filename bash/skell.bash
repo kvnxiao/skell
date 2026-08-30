@@ -19,7 +19,7 @@ export SKELL_ROOT SKELL_DATA_DIR SKELL_HISTORY
 if [ ! -d "$SKELL_DATA_DIR" ]; then
   (umask 077; mkdir -p "$SKELL_DATA_DIR") || return 0
 fi
-[ -e "$SKELL_HISTORY" ] || (umask 077; : > "$SKELL_HISTORY")
+[ -e "$SKELL_HISTORY" ] || (umask 077; : >> "$SKELL_HISTORY")
 
 # Preserve the user's HISTCONTROL and HISTIGNORE settings while adding
 # ignorespace. With ignoredups, repeated commands do not advance HISTCMD and
@@ -31,11 +31,9 @@ esac
 
 _skell_scratch="$SKELL_DATA_DIR/scratch-bash-$$.hist"
 _skell_rank="$SKELL_DATA_DIR/rank-bash-$$.tsv"
+_skell_rank_raw="$SKELL_DATA_DIR/rank-bash-$$.raw.tsv"
 (umask 077; : > "$_skell_scratch")
 _skell_histnum=
-
-_skell_cleanup() { command rm -f -- "$_skell_scratch" "$_skell_rank"; }
-trap _skell_cleanup EXIT
 
 _skell_escape() {
   local s=${1//\\/\\\\}
@@ -106,6 +104,7 @@ _skell_record() {
   # A multiline history entry spans several lines. Read to EOF.
   # `read -d ''` returns non-zero at EOF after assigning the value.
   IFS= read -r -d '' whole < "$_skell_scratch"
+  : > "$_skell_scratch"
   whole=${whole%$'\n'}
   whole=${whole#"${whole%%[![:space:]]*}"}
   num=${whole%%[![:digit:]]*}
@@ -157,27 +156,43 @@ _skell_unescape() {
 
 _skell_history_widget() {
   [ -s "$SKELL_HISTORY" ] || return 0
-  (umask 077; : > "$_skell_rank")
-  gawk -f "$SKELL_ROOT/share/rank.awk" "$SKELL_HISTORY" > "$_skell_rank" || return 0
-  [ -s "$_skell_rank" ] || return 0
+  (umask 077; : > "$_skell_rank"; : > "$_skell_rank_raw")
+  if ! gawk -f "$SKELL_ROOT/share/codec.awk" -f "$SKELL_ROOT/share/rank.awk" \
+    -v "out=$_skell_rank" -v "raw=$_skell_rank_raw" "$SKELL_HISTORY"; then
+    command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+    return 0
+  fi
+  if [ ! -s "$_skell_rank" ]; then
+    command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+    return 0
+  fi
 
-  local _skell_reply chosen
+  local _skell_reply chosen key record id encoded select_code
   chosen=$(sk \
     --height 60% --min-height 15 --layout=reverse --border rounded \
-    --prompt 'history > ' --info inline --ansi \
+    --prompt 'history > ' --info inline \
     --delimiter $'\t' --with-nth '6..' \
     --tiebreak score,index \
     --query "$READLINE_LINE" \
-    --preview "gawk -f \"$SKELL_ROOT/share/codec.awk\" -f \"$SKELL_ROOT/share/preview-history.awk\" -v n={1} \"$_skell_rank\"" \
+    --preview "gawk -f \"$SKELL_ROOT/share/codec.awk\" -f \"$SKELL_ROOT/share/preview-history.awk\" -v n={1} \"$_skell_rank_raw\"" \
     --preview-window 'right:55%:wrap' \
     --bind 'enter:accept(edit),alt-enter:accept(run)' < "$_skell_rank")
   case $chosen in
     *$'\n'*) ;;
-    *) return 0 ;;
+    *)
+      command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+      return 0
+      ;;
   esac
 
-  local key=${chosen%%$'\n'*} record=${chosen#*$'\n'}
-  _skell_unescape "${record#*$'\t'*$'\t'*$'\t'*$'\t'*$'\t'}"
+  key=${chosen%%$'\n'*}
+  record=${chosen#*$'\n'}
+  id=${record%%$'\t'*}
+  encoded=$(gawk -f "$SKELL_ROOT/share/select-history.awk" -v "n=$id" "$_skell_rank_raw")
+  select_code=$?
+  command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+  [ "$select_code" -eq 0 ] || return 0
+  _skell_unescape "$encoded"
   READLINE_LINE=$_skell_reply
   READLINE_POINT=${#READLINE_LINE}
 

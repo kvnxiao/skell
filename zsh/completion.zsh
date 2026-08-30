@@ -173,9 +173,10 @@ _skell_menu() {
   fi
 
   # The record may contain filesystem paths. Create it under a private umask;
-  # the exit hook in zsh/init.zsh removes the same path.
+  # the exit hook in zsh/init.zsh removes both files.
   local rec=$_skell_complete_rec
-  (umask 077; : > $rec)
+  local candidates=$_skell_complete_candidates
+  (umask 077; : > $rec; : > $candidates)
   local -a lines=()
   local -i hasdir=0
   for (( i = 1; i <= $#ids; i++ )); do
@@ -194,11 +195,16 @@ _skell_menu() {
       gi=$_skell_grps[$ids[i]]
       g=${${_skell_groups[gi]:-}//[$'\n\t']/ }
       (( $#g > gw - 1 )) && g=${g[1,gw-2]}$'…'
-      g=$'\033[2m'${(r:$gw:)g}$'\033[0m'
+      g=${(r:$gw:)g}
     fi
     lines+=("$ids[i]"$'\t'"$p"$'\t'"$g"$'\t'"$disp[i]")
   done
-  print -rl -- $lines > $rec || return 1
+  if ! print -rl -- $lines > $rec \
+    || ! gawk -f $SKELL_ROOT/share/codec.awk \
+      -f $SKELL_ROOT/share/completion-candidates.awk $rec > $candidates; then
+    command rm -f -- $rec $candidates
+    return 1
+  fi
 
   local -i rows=$(( $#ids + 2 )) cap=$(( LINES * 2 / 3 ))
   (( rows > cap )) && rows=$cap
@@ -211,7 +217,7 @@ _skell_menu() {
     nth=(--nth 2)
   fi
   if (( hasdir )); then
-    prev=(--preview "gawk -f \"$SKELL_ROOT/share/preview-complete.awk\" -v n={1} \"$rec\""
+    prev=(--preview "gawk -f \"$SKELL_ROOT/share/codec.awk\" -f \"$SKELL_ROOT/share/preview-complete.awk\" -v n={1} \"$rec\""
           --preview-window 'right:50%:wrap')
   fi
 
@@ -223,8 +229,8 @@ _skell_menu() {
     --delimiter $'\t' --with-nth $with $nth \
     --tiebreak score,begin,index \
     --bind 'tab:down,btab:up,ctrl-space:toggle' \
-    $prev < $rec)}")
-  command rm -f $rec
+    $prev < $candidates)}")
+  command rm -f -- $rec $candidates
 
   [[ -n $chosen[1] ]] || return 1
 

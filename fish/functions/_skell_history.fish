@@ -8,11 +8,26 @@ function _skell_history --description "Search skell's history with skim"
     # beside these functions.
     set -l awk_dir (status dirname)/skell-share
 
-    # The ranked file contains the full history. Keep it in skell's private
+    # The ranked files contain the full history. Keep them in skell's private
     # data directory. Because MSYS2 and Windows use separate process ID spaces,
     # include the shell name to avoid collisions.
     set -l rank $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv
-    gawk -f $awk_dir/rank.awk $SKELL_HISTORY >$rank; or return
+    set -l raw_rank $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv
+    set -l prior_umask (umask)
+    umask 077
+    printf '' >$rank
+    printf '' >$raw_rank
+    umask $prior_umask
+    gawk -f $awk_dir/codec.awk -f $awk_dir/rank.awk \
+        -v "out=$rank" -v "raw=$raw_rank" $SKELL_HISTORY
+    or begin
+        command rm -f -- $rank $raw_rank
+        return
+    end
+    if not test -s $rank
+        command rm -f -- $rank $raw_rank
+        return
+    end
 
     set -l query (commandline -b)[1]
 
@@ -20,22 +35,29 @@ function _skell_history --description "Search skell's history with skim"
     printf '\n' >/dev/tty
     set -l chosen (sk \
         --height 60% --min-height 15 --layout=reverse --border rounded \
-        --prompt 'history ❯ ' --info inline --ansi \
+        --prompt 'history ❯ ' --info inline \
         --delimiter \t --with-nth 6.. \
         --tiebreak score,index \
         --query "$query" \
-        --preview "gawk -f \"$awk_dir/codec.awk\" -f \"$awk_dir/preview-history.awk\" -v n={1} \"$rank\"" \
+        --preview "gawk -f \"$awk_dir/codec.awk\" -f \"$awk_dir/preview-history.awk\" -v n={1} \"$raw_rank\"" \
         --preview-window 'right:55%:wrap' \
         --bind 'enter:accept(edit),alt-enter:accept(run)' <$rank)
 
     if test (count $chosen) -lt 2
+        command rm -f -- $rank $raw_rank
         commandline -f repaint
         return
     end
 
-    # A bare command substitution would split a multiline command and drop its
-    # final newline.
-    set -l command (_skell_unescape (string split -m 5 \t -- $chosen[2])[6] | string collect --allow-empty)
+    set -l id (string split -m 1 \t -- $chosen[2])[1]
+    set -l encoded (gawk -f $awk_dir/select-history.awk -v "n=$id" $raw_rank)
+    set -l select_status $status
+    command rm -f -- $rank $raw_rank
+    test $select_status -eq 0; or begin
+        commandline -f repaint
+        return
+    end
+    set -l command (_skell_unescape "$encoded" | string collect --allow-empty)
     commandline --replace -- $command
     if test "$chosen[1]" = run
         commandline -f execute

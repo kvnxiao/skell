@@ -44,6 +44,8 @@ need fish 'codec-fish'  && run codec-fish  bash "$here/codec-fish.sh"
 need fish 'plugin-fish' && run plugin-fish bash "$here/plugin-fish.sh"
 need fish 'path-fish'   && run path-fish   bash "$here/path-fish.sh"
 need gawk 'record'      && run record      bash "$here/record.sh"
+run initialize bash "$here/initialize.sh"
+need gawk 'render'      && run render      bash "$here/render.sh"
 need gawk 'migrate'     && run migrate     bash "$here/migrate.sh"
 need gawk 'permissions' && run permissions bash "$here/permissions.sh"
 

@@ -20,11 +20,13 @@ $1 != n { next }
   cmd = $6
   for (f = 7; f <= NF; f++) cmd = cmd FS $f
 
+  safe_code = skell_visible($4)
   status = ($4 == "-1") ? dim "exit unknown" off : \
-           (($4 == "0") ? dim "exit " off "0" : bad "exit " $4 off)
+           (($4 == "0") ? dim "exit " off "0" : bad "exit " safe_code off)
   printf("%s%s%s  %s·%s  %s  %s·%s  %s\n", accent, strftime("%Y-%m-%d %H:%M", $2), off,
          dim, off, ago(systime() - $2), dim, off, status)
-  printf("%sruns%s %d   %sin%s %s\n\n", dim, off, $3, dim, off, skell_unescape($5))
-  print skell_unescape(cmd)
+  printf("%sruns%s %d   %sin%s %s\n\n", dim, off, $3, dim, off,
+         skell_visible(skell_unescape($5)))
+  print skell_visible(skell_unescape(cmd))
   exit
 }

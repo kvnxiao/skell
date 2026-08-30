@@ -85,5 +85,6 @@ foreach ($pad in 0, 1, 2, 3) {
 
 Assert-Record 'non-ASCII record' (Get-SkellFittedRecord "1787700487`t/d`t0`tpwsh" ('世' * 400))
 
+Remove-Module Skell
 Write-Host "codec-pwsh: $pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

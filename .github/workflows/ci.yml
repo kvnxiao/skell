@@ -71,3 +71,26 @@ jobs:
               -Settings PSScriptAnalyzerSettings.psd1 -Severity Error,Warning,Information)
           $findings | Format-Table -Wrap
           if (@($findings | Where-Object Severity -In 'Error', 'Warning').Count) { exit 1 }
+
+  minimum-powershell:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/powershell:7.4-ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run PowerShell suites on the minimum version
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion -lt [version]'7.4' -or
+              $PSVersionTable.PSVersion -ge [version]'7.5') { exit 1 }
+          $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) "skell-pwsh-$PID"
+          try {
+            $null = New-Item -ItemType Directory -Path $sandbox -Force
+            $env:SKELL_DATA_DIR = Join-Path $sandbox data
+            $env:SKELL_HISTORY = Join-Path $sandbox history.tsv
+            ./tests/codec-pwsh.ps1 -VectorsTsv ./tests/lib/vectors.tsv `
+              -ModulePath ./powershell/Skell.psm1
+            ./tests/lifecycle-pwsh.ps1 -ModulePath ./powershell/Skell.psm1 `
+              -Sandbox $sandbox
+          } finally {
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction Ignore
+          }
