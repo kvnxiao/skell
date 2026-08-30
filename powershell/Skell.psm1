@@ -266,7 +266,7 @@ if (-not $script:SkellHooked) {
     # a command that ran before the import.
     $script:SkellLastId = (Get-History -Count 1).Id
     if ($null -eq $script:SkellLastId) { $script:SkellLastId = -1 }
-    $script:SkellInnerPrompt = $function:prompt
+    $script:SkellInnerPrompt = (Get-Command prompt -CommandType Function -ErrorAction Ignore).ScriptBlock
 
     Set-Item -Path function:global:prompt -Value {
         $ok = $global:?

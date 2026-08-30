@@ -46,6 +46,10 @@ skell_true 'history candidates contain no terminal control bytes' \
 printf '%s' "$command" > "$expected"
 gawk -f "$SKELL_ROOT/share/select-history.awk" -v n=1 "$raw" > "$selected"
 skell_eq_file 'history selection preserves exact command bytes' "$expected" "$selected"
+skell_true 'history selector accepts an omitted selection' \
+  gawk -f "$SKELL_ROOT/share/select-history.awk" "$raw"
+skell_false 'history selector rejects an unknown selection' \
+  gawk -f "$SKELL_ROOT/share/select-history.awk" -v n=2 "$raw"
 
 gawk -f "$SKELL_ROOT/share/codec.awk" -f "$SKELL_ROOT/share/preview-history.awk" \
   -v n=1 "$raw" > "$preview"

@@ -1,6 +1,6 @@
 BEGIN { FS = "\t" }
 
-$1 == n {
+n != "" && $1 == n {
   cmd = $6
   for (f = 7; f <= NF; f++) cmd = cmd FS $f
   printf("%s", cmd)
@@ -8,4 +8,4 @@ $1 == n {
   exit
 }
 
-END { if (!found) exit 1 }
+END { if (n != "" && !found) exit 1 }
