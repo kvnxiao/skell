@@ -24,24 +24,15 @@ gawk -f "$SKELL_ROOT/share/codec.awk" -f "$SKELL_ROOT/share/rank.awk" \
   -v "out=$rank" -v "raw=$raw" "$store"
 
 skell_true 'history candidates render command controls visibly' \
-  gawk -v needle='<0x1B>]0;command<0x07>' 'index($0, needle) { found=1 } END { exit !found }' "$rank"
+  gawk -v needle='<0x1B>]0;command<0x07>' -f "$SKELL_ROOT/tests/lib/contains.awk" "$rank"
 skell_true 'history candidates render C1 controls visibly' \
-  gawk -v needle='<0x9D>c1' 'index($0, needle) { found=1 } END { exit !found }' "$rank"
+  gawk -v needle='<0x9D>c1' -f "$SKELL_ROOT/tests/lib/contains.awk" "$rank"
 skell_true 'history candidates render directory controls visibly' \
-  gawk -v needle='<0x1B>]0;directory<0x07>' 'index($0, needle) { found=1 } END { exit !found }' "$rank"
+  gawk -v needle='<0x1B>]0;directory<0x07>' -f "$SKELL_ROOT/tests/lib/contains.awk" "$rank"
 skell_true 'history candidates render status controls visibly' \
-  gawk -v needle='<0x1B>]0;status<0x07>' 'index($0, needle) { found=1 } END { exit !found }' "$rank"
+  gawk -v needle='<0x1B>]0;status<0x07>' -f "$SKELL_ROOT/tests/lib/contains.awk" "$rank"
 skell_true 'history candidates contain no terminal control bytes' \
-  gawk '
-    BEGIN {
-      for (i = 1; i < 32; i++) if (i != 9) unsafe[sprintf("%c", i)] = 1
-      for (i = 127; i < 160; i++) unsafe[sprintf("%c", i)] = 1
-    }
-    {
-      for (i = 1; i <= length($0); i++) if (substr($0, i, 1) in unsafe) bad = 1
-    }
-    END { exit bad }
-  ' "$rank"
+  gawk -f "$SKELL_ROOT/tests/lib/reject-terminal-controls.awk" "$rank"
 
 printf '%s' "$command" > "$expected"
 gawk -f "$SKELL_ROOT/share/select-history.awk" -v n=1 "$raw" > "$selected"
@@ -54,11 +45,11 @@ skell_false 'history selector rejects an unknown selection' \
 gawk -f "$SKELL_ROOT/share/codec.awk" -f "$SKELL_ROOT/share/preview-history.awk" \
   -v n=1 "$raw" > "$preview"
 skell_true 'history preview renders untrusted controls visibly' \
-  gawk -v needle='<0x1B>]0;command<0x07>' 'index($0, needle) { found=1 } END { exit !found }' "$preview"
+  gawk -v needle='<0x1B>]0;command<0x07>' -f "$SKELL_ROOT/tests/lib/contains.awk" "$preview"
 skell_false 'history preview excludes OSC sequences from history' \
-  gawk -v osc="${escape}]" 'index($0, osc) { found=1 } END { exit !found }' "$preview"
+  gawk -v needle="${escape}]" -f "$SKELL_ROOT/tests/lib/contains.awk" "$preview"
 skell_false 'history preview excludes bells from history' \
-  gawk -v bell="$bell" 'index($0, bell) { found=1 } END { exit !found }' "$preview"
+  gawk -v needle="$bell" -f "$SKELL_ROOT/tests/lib/contains.awk" "$preview"
 
 printf '1\t\tgroup%s]0;group%s\tdescription%s]0;description%s\n' \
   "$escape" "$bell" "$escape" "$bell" > "$completion"
@@ -66,20 +57,20 @@ gawk -f "$SKELL_ROOT/share/codec.awk" \
   -f "$SKELL_ROOT/share/completion-candidates.awk" "$completion" > "$completion_candidates"
 skell_true 'completion candidates render untrusted controls visibly' \
   gawk -v needle='<0x1B>]0;description<0x07>' \
-    'index($0, needle) { found=1 } END { exit !found }' "$completion_candidates"
+    -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_candidates"
 skell_false 'completion candidates exclude OSC sequences from descriptions' \
-  gawk -v osc="${escape}]" 'index($0, osc) { found=1 } END { exit !found }' "$completion_candidates"
+  gawk -v needle="${escape}]" -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_candidates"
 skell_false 'completion candidates exclude bells from descriptions' \
-  gawk -v bell="$bell" 'index($0, bell) { found=1 } END { exit !found }' "$completion_candidates"
+  gawk -v needle="$bell" -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_candidates"
 
 gawk -f "$SKELL_ROOT/share/codec.awk" -f "$SKELL_ROOT/share/preview-complete.awk" \
   -v n=1 "$completion" > "$completion_preview"
 skell_true 'completion preview renders untrusted controls visibly' \
   gawk -v needle='<0x1B>]0;description<0x07>' \
-    'index($0, needle) { found=1 } END { exit !found }' "$completion_preview"
+    -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_preview"
 skell_false 'completion preview excludes OSC sequences from descriptions' \
-  gawk -v osc="${escape}]" 'index($0, osc) { found=1 } END { exit !found }' "$completion_preview"
+  gawk -v needle="${escape}]" -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_preview"
 skell_false 'completion preview excludes bells from descriptions' \
-  gawk -v bell="$bell" 'index($0, bell) { found=1 } END { exit !found }' "$completion_preview"
+  gawk -v needle="$bell" -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_preview"
 
 skell_report
