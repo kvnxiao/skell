@@ -86,6 +86,32 @@ try {
 
 Remove-Module Skell
 
+if ((Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) -and
+    (Get-Command Get-PSReadLineKeyHandler -ErrorAction Ignore)) {
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -Function ReverseSearchHistory
+    Import-Module $ModulePath -Force
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+r'
+    Assert-Equal 'import installs the Ctrl+R handler' 'Search skell history' $handler.Function
+    Remove-Module Skell
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+r'
+    Assert-Equal 'remove restores the prior Ctrl+R handler' 'ReverseSearchHistory' $handler.Function
+
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -BriefDescription 'Existing Ctrl R' -ScriptBlock { }
+    Import-Module $ModulePath -Force
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+r'
+    Assert-Equal 'import preserves a custom Ctrl+R handler' 'Existing Ctrl R' $handler.Function
+    Remove-Module Skell
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+r'
+    Assert-Equal 'remove preserves the original custom Ctrl+R handler' 'Existing Ctrl R' $handler.Function
+
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -Function ReverseSearchHistory
+    Import-Module $ModulePath -Force
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -BriefDescription 'Later Ctrl R' -ScriptBlock { }
+    Remove-Module Skell
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+r'
+    Assert-Equal 'remove preserves a later custom Ctrl+R handler' 'Later Ctrl R' $handler.Function
+}
+
 Assert-True 'store stayed inside the sandbox' `
   ($env:SKELL_HISTORY.Replace('\', '/').StartsWith($Sandbox.Replace('\', '/')))
 

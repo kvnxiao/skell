@@ -1,6 +1,10 @@
 # skell -- one command history for bash, fish, powershell, and zsh.
 # https://github.com/kvnxiao/skell
 
+if ($PSVersionTable.PSVersion -lt [version]'7.4') {
+    throw 'skell: PowerShell 7.4 or newer is required'
+}
+
 $env:SKELL_ROOT = Split-Path -Parent $PSScriptRoot
 if (-not $env:SKELL_DATA_DIR) {
     $env:SKELL_DATA_DIR = if ($env:XDG_DATA_HOME) {
@@ -72,9 +76,22 @@ if (-not [System.IO.Directory]::Exists($env:SKELL_DATA_DIR)) {
     }
 }
 if (-not [System.IO.File]::Exists($env:SKELL_HISTORY)) {
-    [System.IO.File]::WriteAllText($env:SKELL_HISTORY, '')
-    try { Set-SkellPrivateAcl $env:SKELL_HISTORY } catch {
-        Write-Warning "skell: could not restrict $env:SKELL_HISTORY : $($_.Exception.Message)"
+    $createdStore = $false
+    try {
+        $stream = [System.IO.FileStream]::new(
+            $env:SKELL_HISTORY,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::ReadWrite)
+        $createdStore = $true
+        $stream.Dispose()
+    } catch [System.IO.IOException] {
+        if (-not [System.IO.File]::Exists($env:SKELL_HISTORY)) { throw }
+    }
+    if ($createdStore) {
+        try { Set-SkellPrivateAcl $env:SKELL_HISTORY } catch {
+            Write-Warning "skell: could not restrict $env:SKELL_HISTORY : $($_.Exception.Message)"
+        }
     }
 }
 
@@ -104,12 +121,16 @@ function Open-SkellStore {
         [System.IO.FileShare]::ReadWrite)
 }
 
-# The ranked file is a plaintext dump of the whole history, so keep it in
+# The ranked files are plaintext dumps of the whole history, so keep them in
 # skell's own directory rather than a temp directory shared with every other
-# user of the machine. MSYS2 and Windows number processes separately, so its
-# name includes the shell and process ID.
+# user of the machine. MSYS2 and Windows number processes separately, so their
+# names include the shell and process ID.
 function Get-SkellRankPath {
     return Join-Path -Path $env:SKELL_DATA_DIR -ChildPath "rank-pwsh-$PID.tsv"
+}
+
+function Get-SkellRawRankPath {
+    return Join-Path -Path $env:SKELL_DATA_DIR -ChildPath "rank-pwsh-$PID.raw.tsv"
 }
 
 function Get-SkellEscapedField([string]$Text) {
@@ -314,15 +335,24 @@ function Invoke-SkellSearch([string]$SkPath, [string[]]$SkArgs, [string[]]$Lines
     return @(($reading.GetAwaiter().GetResult() -split "\r?\n") | Where-Object { $_.Length -gt 0 })
 }
 
-# Pass the ranked-file path with gawk's `out` variable; PowerShell redirection
-# would decode gawk's stdout and re-encode non-ASCII command text. The preview
-# runs gawk directly instead of starting a nested pwsh process.
-if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
+# Pass the ranked-file paths with gawk variables; PowerShell redirection would
+# decode gawk's stdout and re-encode non-ASCII command text. The preview runs
+# gawk directly instead of starting a nested pwsh process.
+$script:SkellOwnsCtrlR = $false
+$setKeyHandlerCommand = Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore
+$getKeyHandlerCommand = Get-Command Get-PSReadLineKeyHandler -ErrorAction Ignore
+if ($setKeyHandlerCommand -and $getKeyHandlerCommand) {
+    $script:SkellPriorCtrlRHandler = @(Get-PSReadLineKeyHandler -Chord 'Ctrl+r' -ErrorAction Ignore)[0]
+}
+if ($setKeyHandlerCommand -and $getKeyHandlerCommand -and
+    (-not $script:SkellPriorCtrlRHandler -or $script:SkellPriorCtrlRHandler.Group -ne 'Custom')) {
     Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -BriefDescription 'Search skell history' -ScriptBlock {
         # PSReadLine redraws through the console while skim draws on inherited
         # stderr. Keep [Console]::OutputEncoding at UTF-8 through the redraw,
         # then restore the session encoding.
         $priorEncoding = [Console]::OutputEncoding
+        $rank = $null
+        $rawRank = $null
         try {
             [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
             $gawk = Get-SkellGawkPath
@@ -346,31 +376,40 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
             if (-not $store.Exists -or $store.Length -eq 0) { return }
 
             $rank = Get-SkellRankPath
+            $rawRank = Get-SkellRawRankPath
 
             # gawk's -v interprets backslash escapes, so pass POSIX-style paths
             # instead of native paths with backslashes.
             $rankArg = $rank.Replace('\', '/')
+            $rawRankArg = $rawRank.Replace('\', '/')
             $awkDir = (Join-Path -Path $env:SKELL_ROOT -ChildPath 'share').Replace('\', '/')
-            # Remove a stale ranked file before gawk runs; a failed run must not
-            # reuse it.
+            # Remove stale ranked files before gawk runs; a failed run must not
+            # reuse them.
             if ([System.IO.File]::Exists($rank)) { Remove-Item -LiteralPath $rank -Force }
-            try { & $gawk -f "$awkDir/rank.awk" -v "out=$rankArg" $env:SKELL_HISTORY } catch {
+            if ([System.IO.File]::Exists($rawRank)) { Remove-Item -LiteralPath $rawRank -Force }
+            try {
+                $gawkArgs = @(
+                    '-f', "$awkDir/codec.awk", '-f', "$awkDir/rank.awk",
+                    '-v', "out=$rankArg", '-v', "raw=$rawRankArg", $env:SKELL_HISTORY)
+                & $gawk @gawkArgs
+            } catch {
                 Write-Warning "skell: $gawk did not run: $($_.Exception.Message)"
                 [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
                 return
             }
-            if ($LASTEXITCODE -ne 0 -or -not [System.IO.File]::Exists($rank)) { return }
+            if ($LASTEXITCODE -ne 0 -or -not [System.IO.File]::Exists($rank) -or
+                -not [System.IO.File]::Exists($rawRank)) { return }
             if (([System.IO.FileInfo]::new($rank)).Length -eq 0) { return }
 
             # cmd.exe removes the first and last quote from a preview command
             # that starts and ends with a quote, so pass the executable name
             # through PATH and quote only its arguments.
             $gawkName = [System.IO.Path]::GetFileName($gawk)
-            $preview = "$gawkName -f `"$awkDir/codec.awk`" -f `"$awkDir/preview-history.awk`" -v n={1} `"$rankArg`""
+            $preview = "$gawkName -f `"$awkDir/codec.awk`" -f `"$awkDir/preview-history.awk`" -v n={1} `"$rawRankArg`""
 
             $skArgs = @(
                 '--height', '60%', '--min-height', '15', '--layout=reverse', '--border', 'rounded',
-                '--prompt', 'history > ', '--info', 'inline', '--ansi',
+                '--prompt', 'history > ', '--info', 'inline',
                 '--delimiter', "`t", '--with-nth', '6..',
                 '--tiebreak', 'score,index',
                 '--query', $line,
@@ -385,16 +424,24 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) {
                 [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
                 return
             }
-            $fields = $chosen[1].Split("`t", 6)
+            $id = $chosen[1].Split("`t", 2)[0]
+            $record = [System.IO.File]::ReadLines($rawRank) |
+                Where-Object { $_.StartsWith("$id`t", [System.StringComparison]::Ordinal) } |
+                Select-Object -First 1
+            if ($null -eq $record) { return }
+            $fields = $record.Split("`t", 6)
             [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, (Convert-SkellEscape $fields[5]))
             [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
             if ($chosen[0] -eq 'run') {
                 [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
             }
         } finally {
+            if ($rank) { Remove-Item -LiteralPath $rank -Force -ErrorAction Ignore }
+            if ($rawRank) { Remove-Item -LiteralPath $rawRank -Force -ErrorAction Ignore }
             [Console]::OutputEncoding = $priorEncoding
         }
     }
+    $script:SkellOwnsCtrlR = $true
 }
 
 # Remove-Module leaves the wrapped prompt and the history handler pointing at a
@@ -408,7 +455,19 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
     if (Get-Command Set-PSReadLineOption -ErrorAction Ignore) {
         Set-PSReadLineOption -AddToHistoryHandler $script:SkellPriorHistoryHandler
     }
+    if ($script:SkellOwnsCtrlR -and
+        (Get-Command Get-PSReadLineKeyHandler -ErrorAction Ignore)) {
+        $currentCtrlR = @(Get-PSReadLineKeyHandler -Chord 'Ctrl+r' -ErrorAction Ignore)[0]
+        if ($currentCtrlR -and $currentCtrlR.Function -eq 'Search skell history') {
+            if ($script:SkellPriorCtrlRHandler) {
+                Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -Function $script:SkellPriorCtrlRHandler.Function
+            } elseif (Get-Command Remove-PSReadLineKeyHandler -ErrorAction Ignore) {
+                Remove-PSReadLineKeyHandler -Chord 'Ctrl+r'
+            }
+        }
+    }
     Remove-Item -LiteralPath (Get-SkellRankPath) -Force -ErrorAction Ignore
+    Remove-Item -LiteralPath (Get-SkellRawRankPath) -Force -ErrorAction Ignore
 }
 
 Export-ModuleMember -Function Convert-SkellEscape, Get-SkellEscapedField,

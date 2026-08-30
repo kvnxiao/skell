@@ -31,6 +31,21 @@ case ${SKELL_STUB_MODE:-ok} in
     printf '2026-01-15 10:00:00 -05:00\t/home/u\t0\techo one\0'
     printf '2026-01-16 11:00:00 -05:00\t/home/u\t0\techo two\0'
     ;;
+  ztime)
+    printf '2026-01-15T15:00:00Z\t/home/u\t0\techo one\0'
+    printf '2026-01-16T16:00:00Z\t/home/u\t0\techo two\0'
+    ;;
+  malformed)
+    printf 'broken atuin row\0'
+    ;;
+  mixedmalformed)
+    printf '2026-08-01 10:00:00\t/home/u\t0\techo one\0'
+    printf 'broken atuin row\0'
+    ;;
+  mixedbadtime)
+    printf '2026-08-01 10:00:00\t/home/u\t0\techo one\0'
+    printf 'not a timestamp\t/home/u\t0\techo two\0'
+    ;;
   outoforder)
     printf '2026-08-09 10:00:00\t/home/u\t0\techo late\0'
     printf '2026-08-01 10:00:00\t/home/u\t0\techo early\0'
@@ -84,14 +99,35 @@ skell_false 'refused undateable import writes no store' test -e "$target.bad"
 skell_true 'refused undateable import says why' \
   grep -q 'did not parse' "$SKELL_SANDBOX/migrate.err"
 
-# atuin may use an ISO separator or append a UTC offset. Both forms must
-# convert.
-for mode in isotime offsettime; do
+for mode in isotime offsettime ztime; do
   SKELL_STUB_MODE=$mode
   rm -f "$target.$mode"
   skell_true "$mode import succeeds" run_migrate --output "$target.$mode"
   skell_eq "$mode import writes both records" 2 \
     "$(wc -l < "$target.$mode" | tr -d ' ')"
+done
+
+SKELL_STUB_MODE=mixedbadtime
+rm -f "$target.mixedbadtime"
+skell_false 'partially undateable import is refused' \
+  run_migrate --output "$target.mixedbadtime"
+skell_false 'partially undateable import publishes no store' \
+  test -e "$target.mixedbadtime"
+skell_true 'partially undateable import reports the skipped timestamp' \
+  grep -q 'timestamps did not parse' "$SKELL_SANDBOX/migrate.err"
+
+skell_eq 'offset timestamp preserves its absolute time' 1768489200 \
+  "$(gawk -F'\t' -e 'NR == 1 { print $1 }' "$target.offsettime")"
+skell_eq 'UTC timestamp preserves its absolute time' 1768489200 \
+  "$(gawk -F'\t' -e 'NR == 1 { print $1 }' "$target.ztime")"
+
+for mode in malformed mixedmalformed; do
+  SKELL_STUB_MODE=$mode
+  rm -f "$target.$mode"
+  skell_false "$mode import is refused" run_migrate --output "$target.$mode"
+  skell_false "$mode import publishes no store" test -e "$target.$mode"
+  skell_true "$mode import reports malformed input" \
+    grep -q 'malformed records' "$SKELL_SANDBOX/migrate.err"
 done
 
 SKELL_STUB_MODE=outoforder

@@ -16,13 +16,13 @@ Skell supports bash, fish, PowerShell, and zsh on Windows, Linux, and macOS:
 | ---------- | ----- | -------------- |
 | bash       | 5.0   | 5.3            |
 | fish       | 4.0   | 4.8            |
-| PowerShell | 7.0   | 7.6            |
+| PowerShell | 7.4   | 7.6            |
 | zsh        |       | 5.9            |
 
 Bash 5.0 supplies `EPOCHSECONDS`, fish 4.0 supplies `path mtime` and the
-`ctrl-r` key notation used by the binding, and PowerShell 7 supplies
-`FileSystemAclExtensions`. The zsh integration uses parameter flags and hooks
-available before zsh 5.9.
+`ctrl-r` key notation used by the binding, and PowerShell 7.4 supplies the .NET
+filesystem APIs used to apply Unix modes. The zsh integration uses parameter
+flags and hooks available before zsh 5.9.
 
 - [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6. The
   `accept(edit)` and `accept(run)` binds are skim's current syntax; skim also
@@ -80,7 +80,10 @@ runs first while `$?` still records the user's command:
 Import-Module "$HOME\github\skell\powershell\Skell.psm1"
 ```
 
-`Remove-Module Skell` restores the prompt and the PSReadLine history handler.
+`Remove-Module Skell` restores the prompt, PSReadLine history handler, and prior
+`Ctrl+R` binding. When `Ctrl+R` already has a custom handler, Skell preserves it
+and does not install its history-search binding. Removing Skell does not replace
+a custom handler installed after Skell.
 
 History search requires `sk` and `gawk`. If either is missing, the search leaves
 the command line unchanged; PowerShell also writes a warning.
@@ -149,6 +152,11 @@ line. The decoder consumes `\\` before it decodes the other escape sequences,
 so a command containing a literal `\n` and a command containing a newline
 round-trip to different strings. Unrecognized escapes remain unchanged. NUL is
 outside the contract because no supported line editor produces it.
+
+Before passing history or completion text to skim, Skell renders C0 and C1
+controls and DEL as `<0xNN>`. History selection reads the exact command from a
+separate raw ranked file under `SKELL_DATA_DIR`, so the visible markers do not
+change the command placed on the line.
 
 A trailing `\+` marks a record cut by the length cap. If the directory alone is
 long enough to leave no room for the command, the directory is stored as
@@ -253,9 +261,11 @@ writes temporary files beside the target, validates the converted records, and
 publishes the staged file with one rename. A shell write that races the staging
 step can be lost. Without `--force`, a normal import prompts before starting.
 
-Validation checks field count, record length, and oldest-first order. If
-conversion fails, the target remains byte for byte unchanged. Retrying does not
-duplicate a partial prefix. Existing target permissions are preserved.
+Validation checks field count, timestamp parsing, record length, and
+oldest-first order. UTC designators and numeric UTC offsets preserve the
+timestamp's absolute time. If conversion fails, the target remains byte for
+byte unchanged. Retrying does not duplicate a partial prefix. Existing target
+permissions are preserved.
 
 When `workspaces = true`, `atuin history list` limits output to the Git
 repository containing the current directory. The migration sets

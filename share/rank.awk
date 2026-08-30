@@ -1,11 +1,13 @@
 # Rank skell's store by frecency and emit one line per distinct command.
 #
-# Output fields: id, last epoch, run count, last exit, last directory, command.
-# Lines are printed best first; on tied match scores, skim's index tiebreak
-# falls back to that order.
+# Candidate fields: id, last epoch, run count, last exit, visible directory,
+# visible command. Raw fields use the same layout in the file passed as
+# -v raw=<path>. Lines are printed best first; on tied match scores, skim's
+# index tiebreak falls back to that order.
 #
 # PowerShell decodes native stdout before redirecting it and would re-encode
-# non-ASCII commands. Pass -v out=<path> for direct output.
+# non-ASCII commands. Pass -v out=<path> and -v raw=<path> for direct output.
+# Load share/codec.awk first.
 
 function weight(age) {
   if (age < 3600) return 4
@@ -41,9 +43,15 @@ NF < 5 { next }
 
 END {
   target = (out == "") ? "/dev/stdout" : out
+  raw_target = (raw == "") ? "/dev/null" : raw
   PROCINFO["sorted_in"] = "by_score"
   for (cmd in score) {
     id++
-    printf("%d\t%d\t%d\t%s\t%s\t%s\n", id, last[cmd], count[cmd], code[cmd], dir[cmd], cmd) > target
+    printf("%d\t%d\t%d\t%s\t%s\t%s\n",
+           id, last[cmd], count[cmd], code[cmd], dir[cmd], cmd) > raw_target
+    printf("%d\t%d\t%d\t%s\t%s\t%s\n",
+           id, last[cmd], count[cmd], skell_visible(code[cmd]),
+           skell_visible(skell_unescape(dir[cmd])),
+           skell_visible(skell_unescape(cmd))) > target
   }
 }
