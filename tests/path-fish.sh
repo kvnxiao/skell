@@ -59,4 +59,21 @@ skell_eq 'the rewritten store accepts a record' 0 "$(cat -- "$out/store-append")
 skell_eq 'the store lands in the sandbox' yes \
   "$(cat -- "$out/store-landed" 2>/dev/null)"
 
+skell_eq 'the hook skips conversion for MSYS2 paths' no \
+  "$(cat -- "$out/posix-converted" 2>/dev/null || printf no)"
+skell_eq 'the hook preserves an MSYS2 data directory' \
+  "$SKELL_SANDBOX_MSYS/posix" "$(cat -- "$out/posix-data")"
+skell_eq 'the hook preserves an MSYS2 store path' \
+  "$SKELL_SANDBOX_MSYS/posix/history.tsv" "$(cat -- "$out/posix-history")"
+skell_eq 'an empty data directory falls back to XDG_DATA_HOME' \
+  "$SKELL_SANDBOX_MSYS/xdg/skell" "$(cat -- "$out/empty-data")"
+skell_eq 'an empty store path falls back under the data directory' \
+  "$SKELL_SANDBOX_MSYS/xdg/skell/history.tsv" "$(cat -- "$out/empty-history")"
+skell_eq 'an empty XDG_DATA_HOME falls back to HOME' \
+  "$SKELL_SANDBOX_MSYS/home/.local/share/skell" "$(cat -- "$out/empty-xdg-data")"
+skell_eq 'a mixed pair keeps the MSYS2 data directory' \
+  "$SKELL_SANDBOX_MSYS/mixed" "$(cat -- "$out/mixed-data")"
+skell_eq 'a mixed pair rewrites the Windows store path' \
+  "$SKELL_SANDBOX/mixed/history.tsv" "$(cat -- "$out/mixed-history")"
+
 skell_report

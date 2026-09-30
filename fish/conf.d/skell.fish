@@ -3,18 +3,20 @@
 
 status is-interactive; or return
 
-if not set -q SKELL_DATA_DIR
-    if set -q XDG_DATA_HOME
+if test -z "$SKELL_DATA_DIR"
+    if test -n "$XDG_DATA_HOME"
         set -gx SKELL_DATA_DIR $XDG_DATA_HOME/skell
     else
         set -gx SKELL_DATA_DIR $HOME/.local/share/skell
     end
 end
-set -q SKELL_HISTORY; or set -gx SKELL_HISTORY $SKELL_DATA_DIR/history.tsv
+test -n "$SKELL_HISTORY"; or set -gx SKELL_HISTORY $SKELL_DATA_DIR/history.tsv
 
 # Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it.
-# Rewrite the path before opening the store.
-if test -e /usr/bin/msys-2.0.dll
+# Rewrite the path before opening the store. Match drive letters first:
+# converting costs ~3ms under MSYS2.
+if string match -qr '^[A-Za-z]:[\x5c/]' -- $SKELL_DATA_DIR $SKELL_HISTORY
+    and test -e /usr/bin/msys-2.0.dll
     set -gx SKELL_DATA_DIR (_skell_msys_path $SKELL_DATA_DIR)
     set -gx SKELL_HISTORY (_skell_msys_path $SKELL_HISTORY)
 end
