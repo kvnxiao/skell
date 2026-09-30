@@ -138,7 +138,7 @@ Selecting multiple matches inserts them with spaces between them.
 ## Store
 
 Skell stores history in `$XDG_DATA_HOME/skell/history.tsv` or, when
-`XDG_DATA_HOME` is unset, in `~/.local/share/skell/history.tsv`. The file
+`XDG_DATA_HOME` is unset or empty, in `~/.local/share/skell/history.tsv`. The file
 contains one tab-separated record per line:
 
 ```
