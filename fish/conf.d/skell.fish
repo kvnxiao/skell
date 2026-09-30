@@ -29,9 +29,14 @@ if not test -d $SKELL_DATA_DIR; or not test -e $SKELL_HISTORY
     umask $prior_umask
 end
 
+# Spawning rm costs ~25ms under MSYS2, so the exit hook runs it only when a
+# search left rank files behind.
 function _skell_exit --on-event fish_exit
-    command rm -f -- $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv \
-        $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv
+    set -l stale (path filter -- $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv \
+        $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv)
+    if set -q stale[1]
+        command rm -f -- $stale
+    end
 end
 
 # Cygwin turns one `echo` to this O_APPEND descriptor into one NtWriteFile at
