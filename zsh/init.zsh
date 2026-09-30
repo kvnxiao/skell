@@ -27,9 +27,19 @@ _skell_rank_raw=$SKELL_DATA_DIR/rank-zsh-$$.raw.tsv
 _skell_complete_rec=$SKELL_DATA_DIR/complete-zsh-$$.tsv
 _skell_complete_candidates=$SKELL_DATA_DIR/complete-zsh-$$.candidates.tsv
 
+# Spawning rm costs ~25ms under MSYS2, so the exit hook runs it only when a
+# search or completion left files behind.
 _skell_exit() {
-  command rm -f -- $_skell_rank $_skell_rank_raw \
-    $_skell_complete_rec $_skell_complete_candidates
+  emulate -L zsh
+  local file
+  local -a stale
+  for file in $_skell_rank $_skell_rank_raw \
+    $_skell_complete_rec $_skell_complete_candidates; do
+    [[ -e $file ]] && stale+=($file)
+  done
+  if (( $#stale )); then
+    command rm -f -- $stale
+  fi
 }
 add-zsh-hook zshexit _skell_exit
 
