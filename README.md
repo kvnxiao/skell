@@ -38,7 +38,7 @@ flags and hooks available before zsh 5.9.
   only through `PATH`.
 - [eza](https://github.com/eza-community/eza) or
   [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
-  preview; without either the preview uses `ls`
+  preview; by default, the preview uses `ls` without either
 
 ## Install
 
@@ -169,16 +169,18 @@ and the directory lister for a directory; set `off` to skip them.
 
 The preview lists a directory with the command that `SKELL_COMPLETE_LS` selects:
 
-| value           | lister                                    |
-| --------------- | ----------------------------------------- |
-| `eza` (default) | `eza`, then `lsd` if eza is not on `PATH` |
-| `lsd`           | `lsd`, then `eza` if lsd is not on `PATH` |
-| `ls`            | `ls`                                      |
+| value          | lister                                        |
+| -------------- | --------------------------------------------- |
+| unset or empty | the first of `eza`, `lsd`, and `ls` on `PATH` |
+| `eza`          | `eza`                                         |
+| `lsd`          | `lsd`                                         |
+| `ls`           | `ls`                                          |
 
-When neither eza nor lsd is on `PATH`, the preview uses `ls`. Any other value
-makes the preview print an error instead of a listing. The preview reads the
-variable from the environment, so export it: `export SKELL_COMPLETE_LS=lsd` in
-zsh, or `set -gx SKELL_COMPLETE_LS lsd` in fish.
+A lister named by `SKELL_COMPLETE_LS` has no fallback: when it is not on `PATH`, the preview shows
+the shell's error. Any other value makes the preview print an error instead of a
+listing. The preview reads the variable from the environment, so export it:
+`export SKELL_COMPLETE_LS=lsd` in zsh, or `set -gx SKELL_COMPLETE_LS lsd` in
+fish.
 
 ## Store
 
