@@ -10,6 +10,12 @@
 
 set -uo pipefail
 
+if [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
+  printf '%s: bash %s is older than 5.0; put bash 5 first on PATH\n' \
+    "$(basename -- "$0")" "$BASH_VERSION" >&2
+  exit 1
+fi
+
 SKELL_TEST_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 SKELL_REPO_ROOT=$(dirname -- "$SKELL_TEST_ROOT")
 

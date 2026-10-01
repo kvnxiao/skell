@@ -77,8 +77,9 @@ uses an awk directory name that differs from the fish sources.
 
 ## Verification
 
-Run the applicable commands from the repository root. The command patterns
-select files by directory and extension. Adding a file under a covered directory
+Run the applicable commands from the repository root with bash 5.0 or newer
+first on `PATH`; on macOS, install Homebrew's bash. The command patterns select
+files by directory and extension. Adding a file under a covered directory
 does not require editing this list:
 
 ```sh

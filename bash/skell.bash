@@ -6,6 +6,11 @@ case $- in
   *) return 0 ;;
 esac
 
+if [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
+  printf 'skell: bash %s is older than 5.0; skell is not loaded\n' "$BASH_VERSION" >&2
+  return 0
+fi
+
 if [ -z "${SKELL_ROOT:-}" ]; then
   SKELL_ROOT=${BASH_SOURCE[0]%/*}
   SKELL_ROOT=${SKELL_ROOT%/*}

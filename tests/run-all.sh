@@ -4,6 +4,11 @@
 
 set -uo pipefail
 
+if [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
+  printf 'run-all: bash %s is older than 5.0; put bash 5 first on PATH\n' "$BASH_VERSION" >&2
+  exit 1
+fi
+
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname -- "$here")
 

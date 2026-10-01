@@ -24,6 +24,10 @@ Bash 5.0 supplies `EPOCHSECONDS`, fish 4.0 supplies `path mtime` and the
 filesystem APIs used to apply Unix modes. The zsh integration uses parameter
 flags and hooks available before zsh 5.9.
 
+macOS ships bash 3.2 as `/bin/bash`; install bash 5 with `brew install bash`.
+Under a bash older than 5.0, `bash/skell.bash` prints a warning and loads
+nothing.
+
 - [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6. The
   `accept(edit)` and `accept(run)` binds are skim's current syntax; skim also
   accepts their deprecated spelling.
@@ -326,8 +330,10 @@ can produce no records.
 bash tests/run-all.sh
 ```
 
-Each suite creates its own store under a temporary directory and never reads the
-live store. Suites for unavailable shells are skipped and named in the summary.
+The suites need bash 5.0 or newer as the first `bash` on `PATH`; under an older
+bash, they exit with an error. Each suite creates its own store under a
+temporary directory and never reads the live store. Suites for unavailable
+shells are skipped and named in the summary.
 The mode assertions in `tests/permissions.sh` are skipped when the filesystem
 discards the umask, including NTFS mounts under Cygwin and MSYS2.
 
