@@ -73,4 +73,48 @@ skell_false 'completion preview excludes OSC sequences from descriptions' \
 skell_false 'completion preview excludes bells from descriptions' \
   gawk -v needle="$bell" -f "$SKELL_ROOT/tests/lib/contains.awk" "$completion_preview"
 
+listing=$SKELL_SANDBOX/render-listing.tsv
+stubs=$SKELL_SANDBOX/stubs
+gawk_bin=$(command -v gawk)
+printf "1\t/d'x\td'x/\t\n" > "$listing"
+for tool in eza lsd ls; do
+  mkdir -p "$stubs/$tool"
+  cat > "$stubs/$tool/$tool" <<'EOF'
+#!/bin/sh
+printf %s "${0##*/}"; printf ' %s' "$@"; echo
+EOF
+  chmod +x "$stubs/$tool/$tool"
+done
+
+listing_preview() {
+  local lister=$1 path='' tool
+  shift
+  for tool; do path=${path:+$path:}$stubs/$tool; done
+  if [ -n "$lister" ]; then
+    set -- SKELL_COMPLETE_LS="$lister"
+  else
+    set -- -u SKELL_COMPLETE_LS
+  fi
+  env "$@" PATH="$path" "$gawk_bin" -f "$SKELL_ROOT/share/codec.awk" \
+    -f "$SKELL_ROOT/share/preview-complete.awk" -v n=1 "$listing"
+}
+
+skell_eq 'directory preview defaults to eza' \
+  "eza -1 --color=never --no-quotes -- /d'x" "$(listing_preview '' eza lsd ls)"
+skell_eq 'directory preview uses eza when selected' \
+  "eza -1 --color=never --no-quotes -- /d'x" "$(listing_preview eza eza lsd ls)"
+skell_eq 'directory preview uses lsd when selected' \
+  "lsd -1 --color=never -- /d'x" "$(listing_preview lsd eza lsd ls)"
+skell_eq 'directory preview falls back to lsd without eza' \
+  "lsd -1 --color=never -- /d'x" "$(listing_preview '' lsd ls)"
+skell_eq 'directory preview falls back to eza without lsd' \
+  "eza -1 --color=never --no-quotes -- /d'x" "$(listing_preview lsd eza ls)"
+skell_eq 'directory preview falls back to ls without eza or lsd' \
+  "ls -1 -- /d'x" "$(listing_preview '' ls)"
+skell_eq 'directory preview uses ls when selected' \
+  "ls -1 -- /d'x" "$(listing_preview ls eza lsd ls)"
+skell_eq 'directory preview rejects an unknown lister' \
+  'skell: SKELL_COMPLETE_LS must be eza, lsd, or ls, not exa' \
+  "$(listing_preview exa eza lsd ls)"
+
 skell_report

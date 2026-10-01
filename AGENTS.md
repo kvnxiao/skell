@@ -4,7 +4,7 @@
 
 Skell records one command history for bash, fish, PowerShell, and zsh. The
 shell hooks append to the shared TSV store without spawning a process. Search
-and zsh completion may invoke `sk`, `gawk`, `lsd`, or `ls`.
+and zsh completion may invoke `sk`, `gawk`, `eza`, `lsd`, or `ls`.
 
 Treat the store format and shell hooks as one cross-shell interface. A format
 change must update every writer, decoder, preview script, migration script,
@@ -94,10 +94,11 @@ bash tests/run-all.sh
 
 `tests/run-all.sh` covers the codec in all five implementations, the record
 fitter's boundaries, the fish completion menu's prefix, insertion, buffer, and
-control-rendering helpers, each recording hook's output, the files fish loads
-from the built plugin, fish's rewrite of an inherited Windows store path, the
-atuin importer's failure paths, store permissions, and the PowerShell module's
-lifecycle. It skips suites for unavailable shells and names each skipped suite.
+control-rendering helpers, the completion preview's choice of directory lister,
+each recording hook's output, the files fish loads from the built plugin, fish's
+rewrite of an inherited Windows store path, the atuin importer's failure paths,
+store permissions, and the PowerShell module's lifecycle. It skips suites for
+unavailable shells and names each skipped suite.
 When MSYS2 is unavailable, `tests/path-fish.sh` reports a skip.
 
 No suite drives a real line editor. Bash records under `bash -i`; zsh and fish
