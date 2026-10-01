@@ -31,7 +31,8 @@ function _skell_history --description "Search skell's history with skim"
 
     set -l query (commandline -b)[1]
 
-    # Print a newline before skim switches screens to keep the prompt visible.
+    # skim draws from the cursor row, so step below the prompt to keep it
+    # visible, then step back up so fish repaints the prompt on its own row.
     printf '\n' >/dev/tty
     set -l chosen (sk \
         --height 60% --min-height 15 --layout=reverse --border rounded \
@@ -42,6 +43,7 @@ function _skell_history --description "Search skell's history with skim"
         --preview "gawk -f \"$awk_dir/codec.awk\" -f \"$awk_dir/preview-history.awk\" -v n={1} \"$raw_rank\"" \
         --preview-window 'right:55%:wrap' \
         --bind 'enter:accept(edit),alt-enter:accept(run)' <$rank)
+    printf '\e[A' >/dev/tty
 
     if test (count $chosen) -lt 2
         command rm -f -- $rank $raw_rank
