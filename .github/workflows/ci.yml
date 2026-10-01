@@ -59,6 +59,15 @@ jobs:
       - name: Run the suites
         run: bash tests/run-all.sh
 
+      # Homebrew's bash precedes the system bash 3.2 on PATH, and run-all.sh
+      # starts each suite with the first bash on PATH.
+      - name: Run the suites under the system bash
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$RUNNER_TEMP/system-bash"
+          ln -sf /bin/bash "$RUNNER_TEMP/system-bash/bash"
+          PATH="$RUNNER_TEMP/system-bash:$PATH" /bin/bash tests/run-all.sh
+
   analyzer:
     runs-on: windows-latest
     steps:

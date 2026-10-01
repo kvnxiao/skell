@@ -25,9 +25,24 @@ $1 != n { next }
     print skell_visible(text)
     exit
   }
+  lister = ENVIRON["SKELL_COMPLETE_LS"]
+  if (lister == "") lister = "eza"
+  if (lister != "eza" && lister != "lsd" && lister != "ls") {
+    print skell_visible("skell: SKELL_COMPLETE_LS must be eza, lsd, or ls, not " \
+                        lister)
+    exit
+  }
   q = shquote($2)
-  cmd = "if command -v lsd >/dev/null 2>&1; then lsd -1 --color=never -- " q \
-        "; else ls -1 -- " q "; fi 2>&1"
+  cmd = "ls -1 -- " q
+  if (lister != "ls") {
+    other = lister == "eza" ? "lsd" : "eza"
+    args["eza"] = " -1 --color=never --no-quotes -- " q
+    args["lsd"] = " -1 --color=never -- " q
+    cmd = "if command -v " lister " >/dev/null 2>&1; then " lister args[lister] \
+          "; elif command -v " other " >/dev/null 2>&1; then " other args[other] \
+          "; else " cmd "; fi"
+  }
+  cmd = cmd " 2>&1"
   while ((cmd | getline line) > 0) print skell_visible(line)
   close(cmd)
   exit

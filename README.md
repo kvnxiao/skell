@@ -36,8 +36,9 @@ flags and hooks available before zsh 5.9.
   `scoop install gawk`.
   Set `SKELL_GAWK` to override these lookups; the other shells resolve `gawk`
   only through `PATH`.
-- [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
-  preview; without lsd the preview uses `ls`
+- [eza](https://github.com/eza-community/eza) or
+  [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
+  preview; without either the preview uses `ls`
 
 ## Install
 
@@ -134,10 +135,10 @@ filter matches, not group descriptions: `co` does not select every entry in a
 group named `commands`. The `format` style supplies the group text. A value such
 as `Completing %d` fills the column; bare `%d` leaves it empty.
 
-For a candidate that names a directory, the preview uses `lsd` when available
-and otherwise uses `ls`. For other candidates, the preview prints the
-description. Skell shows the preview window only when the candidate set
-contains a directory.
+For a candidate that names a directory, the preview lists it as described in
+[Directory preview](#directory-preview). For other candidates, the preview
+prints the description. Skell shows the preview window only when the candidate
+set contains a directory.
 
 ### fish
 
@@ -161,9 +162,23 @@ candidates, not descriptions.
 | `directory`             | directory listings, shown only when a candidate is a directory |
 | `off`                   | none                                                           |
 
-The preview uses `lsd` when available and otherwise uses `ls`. On Windows, each
-cursor move in the menu starts `cmd.exe` and `gawk`, plus `sh` and `ls` or `lsd`
-for a directory; set `off` to skip them.
+On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`, plus `sh`
+and the directory lister for a directory; set `off` to skip them.
+
+### Directory preview
+
+The preview lists a directory with the command that `SKELL_COMPLETE_LS` selects:
+
+| value           | lister                                    |
+| --------------- | ----------------------------------------- |
+| `eza` (default) | `eza`, then `lsd` if eza is not on `PATH` |
+| `lsd`           | `lsd`, then `eza` if lsd is not on `PATH` |
+| `ls`            | `ls`                                      |
+
+When neither eza nor lsd is on `PATH`, the preview uses `ls`. Any other value
+makes the preview print an error instead of a listing. The preview reads the
+variable from the environment, so export it: `export SKELL_COMPLETE_LS=lsd` in
+zsh, or `set -gx SKELL_COMPLETE_LS lsd` in fish.
 
 ## Store
 
