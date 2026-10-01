@@ -96,7 +96,7 @@ listing_preview() {
   else
     set -- -u SKELL_COMPLETE_LS
   fi
-  env "$@" PATH="$path" "$gawk_bin" -f "$SKELL_ROOT/share/codec.awk" \
+  env "$@" LC_ALL=C PATH="$path" "$gawk_bin" -f "$SKELL_ROOT/share/codec.awk" \
     -f "$SKELL_ROOT/share/preview-complete.awk" -v n=1 "$listing"
 }
 
@@ -108,12 +108,22 @@ skell_eq 'directory preview uses lsd when selected' \
   "lsd -1 --color=never -- /d'x" "$(listing_preview lsd eza lsd ls)"
 skell_eq 'directory preview falls back to lsd without eza' \
   "lsd -1 --color=never -- /d'x" "$(listing_preview '' lsd ls)"
-skell_eq 'directory preview falls back to eza without lsd' \
-  "eza -1 --color=never --no-quotes -- /d'x" "$(listing_preview lsd eza ls)"
 skell_eq 'directory preview falls back to ls without eza or lsd' \
   "ls -1 -- /d'x" "$(listing_preview '' ls)"
 skell_eq 'directory preview uses ls when selected' \
   "ls -1 -- /d'x" "$(listing_preview ls eza lsd ls)"
+
+skell_no_fallback() {
+  local label="directory preview does not replace a missing $1"
+  case $2 in
+    *' -1 '*) skell_not_ok "$label"; printf '       got  %s\n' "$(skell_dump "$2")" >&2 ;;
+    *"$1"*'not found'*) skell_ok "$label" ;;
+    *) skell_not_ok "$label"; printf '       got  %s\n' "$(skell_dump "$2")" >&2 ;;
+  esac
+}
+skell_no_fallback eza "$(listing_preview eza lsd ls)"
+skell_no_fallback lsd "$(listing_preview lsd eza ls)"
+
 skell_eq 'directory preview rejects an unknown lister' \
   'skell: SKELL_COMPLETE_LS must be eza, lsd, or ls, not exa' \
   "$(listing_preview exa eza lsd ls)"
