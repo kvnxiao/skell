@@ -1,8 +1,8 @@
 # skell
 
 Skell gives bash, fish, PowerShell, and zsh one shared command history. It uses
-[skim](https://github.com/skim-rs/skim) for search and replaces zsh's
-tab-completion menu.
+[skim](https://github.com/skim-rs/skim) for search and replaces the fish and
+zsh tab-completion menus.
 
 Each shell appends to the same file without starting a process while recording.
 History search starts skim once and runs the preview helper for the candidate
@@ -86,7 +86,8 @@ and does not install its history-search binding. Removing Skell does not replace
 a custom handler installed after Skell.
 
 History search requires `sk` and `gawk`. If either is missing, the search leaves
-the command line unchanged; PowerShell also writes a warning.
+the command line unchanged; PowerShell also writes a warning. Fish warns once
+per session and falls back to its own history pager and completion.
 
 ## History search
 
@@ -103,11 +104,8 @@ terminal does not answer DSR, the command remains on the line for `Enter`.
 
 ## Completion menu
 
-The completion menu applies only to zsh. Skell binds `Tab` and sends zsh's
-matches through skim. Zsh's completers, matcher lists, and `:completion:*`
-styles still supply the candidates. Skell sets
-`zstyle ':completion:*' list-grouped false` so matches that share a description
-stay on separate rows.
+The completion menu applies to fish and zsh. Skell binds `Tab` and sends the
+shell's matches through skim.
 
 | key          | action                         |
 | ------------ | ------------------------------ |
@@ -117,9 +115,17 @@ stay on separate rows.
 | `Enter`      | insert the selection           |
 | `Esc`        | leave the line untouched       |
 
-Before opening the menu, zsh inserts an unambiguous prefix. Completing `sub`
+Before opening the menu, Skell inserts an unambiguous prefix. Completing `sub`
 against `subdir-one` and `subdir-two` inserts `subdir-`; the next `Tab` opens the
-menu.
+menu. A single match is inserted without the menu.
+
+Selecting multiple matches inserts them with spaces between them.
+
+### zsh
+
+Zsh's completers, matcher lists, and `:completion:*` styles still supply the
+candidates. Skell sets `zstyle ':completion:*' list-grouped false` so matches
+that share a description stay on separate rows.
 
 When matches span groups, Skell shows each group description beside its matches
 in a dim column. Descriptions are capped at 20 characters and longer text is
@@ -133,7 +139,31 @@ and otherwise uses `ls`. For other candidates, the preview prints the
 description. Skell shows the preview window only when the candidate set
 contains a directory.
 
-Selecting multiple matches inserts them with spaces between them.
+### fish
+
+`complete -C` supplies the candidates, so fish's completions, ranking, and
+escaping still apply. Each description appears in a dim column; queries filter
+candidates, not descriptions.
+
+- A token with a `*` glob goes to fish's own completion, which expands it in
+  place.
+- `Shift+Tab` opens fish's pager, and `Tab` then moves through its entries.
+- On an empty line, the menu lists every command.
+- An inserted match gets a trailing space unless it ends in `/`, `=`, `@`, `:`,
+  `.`, `,`, or `-`, matching fish. A space also closes a quote the match left
+  open.
+
+`SKELL_COMPLETE_PREVIEW` selects the preview:
+
+| value                   | preview                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `description` (default) | directory listings and descriptions                            |
+| `directory`             | directory listings, shown only when a candidate is a directory |
+| `off`                   | none                                                           |
+
+The preview uses `lsd` when available and otherwise uses `ls`. On Windows, each
+cursor move in the menu starts `cmd.exe` and `gawk`, plus `sh` and `ls` or `lsd`
+for a directory; set `off` to skip them.
 
 ## Store
 
