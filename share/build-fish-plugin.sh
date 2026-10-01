@@ -36,5 +36,6 @@ fisher install kvnxiao/skell@fish-releases
 ```
 
 Skell needs [skim](https://github.com/skim-rs/skim) and `gawk` on `PATH`.
-`Ctrl+R` searches the store shared by every skell shell.
+`Ctrl+R` searches the store shared by every skell shell, and `Tab` opens
+fish's completions in skim.
 EOF

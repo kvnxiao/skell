@@ -32,10 +32,11 @@ if not test -d $SKELL_DATA_DIR; or not test -e $SKELL_HISTORY
 end
 
 # Spawning rm costs ~25ms under MSYS2, so the exit hook runs it only when a
-# search left rank files behind.
+# search or completion left scratch files behind.
 function _skell_exit --on-event fish_exit
     set -l stale (path filter -- $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv \
-        $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv)
+        $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv \
+        $SKELL_DATA_DIR/complete-fish-$fish_pid.tsv)
     if set -q stale[1]
         command rm -f -- $stale
     end
@@ -78,3 +79,5 @@ end
 
 bind ctrl-r _skell_history
 bind -M insert ctrl-r _skell_history
+bind tab _skell_complete
+bind -M insert tab _skell_complete

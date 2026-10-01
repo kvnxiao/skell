@@ -16,6 +16,12 @@ and the README in the same change.
   `powershell/Skell.psm1`, and `zsh/init.zsh` record and search history.
 - `zsh/completion.zsh` captures zsh completion matches and presents them
   through skim.
+- `fish/functions/_skell_complete*.fish`, `_skell_commandline.fish`,
+  `_skell_unclosed_quote.fish`, and `_skell_visible.fish` present fish's
+  `complete -C` matches through skim.
+- `_skell_skim` runs skim for fish history search and completion.
+  `_skell_scratch` creates and empties scratch files, and `_skell_ready` checks
+  for `sk` and `gawk` once per session.
 - `share/rank.awk` ranks distinct commands by frecency.
 - `share/preview-*.awk` render skim previews.
 - `share/migrate-atuin.sh` and `share/migrate-atuin.awk` import atuin history.
@@ -54,6 +60,8 @@ uses an awk directory name that differs from the fish sources.
   Allow command substitutions around builtins or shell functions when the shell
   evaluates them in-process. Do not use command substitutions around external
   commands.
+- Keep the fish completion path fork-free until skim starts. Empty scratch
+  files with a builtin instead of `rm` and leave deletion to the exit hook.
 - Keep shell-specific implementations direct. Do not introduce a shared
   runtime dependency to remove small amounts of duplication.
 - Load `zsh/completion.zsh` after `compinit`, and preserve zsh's completers,
@@ -85,9 +93,10 @@ bash tests/run-all.sh
 ```
 
 `tests/run-all.sh` covers the codec in all five implementations, the record
-fitter's boundaries, each recording hook's output, the files fish loads from
-the built plugin, fish's rewrite of an inherited Windows store path, the atuin
-importer's failure paths, store permissions, and the PowerShell module's
+fitter's boundaries, the fish completion menu's prefix, insertion, buffer, and
+control-rendering helpers, each recording hook's output, the files fish loads
+from the built plugin, fish's rewrite of an inherited Windows store path, the
+atuin importer's failure paths, store permissions, and the PowerShell module's
 lifecycle. It skips suites for unavailable shells and names each skipped suite.
 When MSYS2 is unavailable, `tests/path-fish.sh` reports a skip.
 

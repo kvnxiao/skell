@@ -1,4 +1,8 @@
 function _skell_history --description "Search skell's history with skim"
+    if not _skell_ready
+        commandline -f history-pager
+        return
+    end
     if not test -s $SKELL_HISTORY
         commandline -f repaint
         return
@@ -13,40 +17,32 @@ function _skell_history --description "Search skell's history with skim"
     # include the shell name to avoid collisions.
     set -l rank $SKELL_DATA_DIR/rank-fish-$fish_pid.tsv
     set -l raw_rank $SKELL_DATA_DIR/rank-fish-$fish_pid.raw.tsv
-    set -l prior_umask (umask)
-    umask 077
-    printf '' >$rank
-    printf '' >$raw_rank
-    umask $prior_umask
+    _skell_scratch $rank $raw_rank
     gawk -f $awk_dir/codec.awk -f $awk_dir/rank.awk \
         -v "out=$rank" -v "raw=$raw_rank" $SKELL_HISTORY
     or begin
-        command rm -f -- $rank $raw_rank
+        _skell_scratch $rank $raw_rank
         return
     end
     if not test -s $rank
-        command rm -f -- $rank $raw_rank
+        _skell_scratch $rank $raw_rank
         return
     end
 
     set -l query (commandline -b)[1]
 
-    # skim draws from the cursor row, so step below the prompt to keep it
-    # visible, then step back up so fish repaints the prompt on its own row.
-    printf '\n' >/dev/tty
-    set -l chosen (sk \
-        --height 60% --min-height 15 --layout=reverse --border rounded \
-        --prompt 'history ❯ ' --info inline \
+    set -l chosen (_skell_skim \
+        --height 60% --min-height 15 \
+        --prompt 'history ❯ ' \
         --delimiter \t --with-nth 6.. \
         --tiebreak score,index \
         --query "$query" \
         --preview "gawk -f \"$awk_dir/codec.awk\" -f \"$awk_dir/preview-history.awk\" -v n={1} \"$raw_rank\"" \
         --preview-window 'right:55%:wrap' \
         --bind 'enter:accept(edit),alt-enter:accept(run)' <$rank)
-    printf '\e[A' >/dev/tty
 
     if test (count $chosen) -lt 2
-        command rm -f -- $rank $raw_rank
+        _skell_scratch $rank $raw_rank
         commandline -f repaint
         return
     end
@@ -54,7 +50,7 @@ function _skell_history --description "Search skell's history with skim"
     set -l id (string split -m 1 \t -- $chosen[2])[1]
     set -l encoded (gawk -f $awk_dir/select-history.awk -v "n=$id" $raw_rank)
     set -l select_status $status
-    command rm -f -- $rank $raw_rank
+    _skell_scratch $rank $raw_rank
     test $select_status -eq 0; or begin
         commandline -f repaint
         return
