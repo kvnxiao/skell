@@ -1,6 +1,6 @@
 function _skell_complete --description "Complete the current token with skim"
     # Shift+Tab opens fish's pager, where Tab moves between its entries.
-    if commandline --paging-mode; or not _skell_ready
+    if test "$SKELL_COMPLETE" = off; or commandline --paging-mode; or not _skell_ready
         commandline -f complete
         return
     end

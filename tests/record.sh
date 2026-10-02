@@ -49,8 +49,8 @@ skell_false 'bash excludes the leading-space command' grep -q 'excluded' "$bash_
 skell_eq 'bash records an absolute directory' 1 \
   "$(gawk -F'\t' -e 'NR == 1 && $2 ~ /^(\/|[A-Za-z]:)/ { print 1 }' "$bash_store")"
 skell_eq 'bash preserves an existing EXIT trap' preserved "$(skell_slurp "$bash_exit_marker")"
-skell_false 'bash clears command text from its scratch file' \
-  gawk 'length($0) { found=1 } END { exit !found }' "$bash_data"/scratch-bash-*.hist
+bash_left=("$bash_data"/scratch-bash-*.hist)
+skell_false 'bash deletes its scratch file at exit' [ -e "${bash_left[0]}" ]
 
 zsh_store="$SKELL_SANDBOX/zsh.tsv"
 {

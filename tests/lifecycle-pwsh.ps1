@@ -112,6 +112,69 @@ if ((Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) -and
     Assert-Equal 'remove preserves a later custom Ctrl+R handler' 'Later Ctrl R' $handler.Function
 }
 
+if ((Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore) -and
+    (Get-Command Get-PSReadLineKeyHandler -ErrorAction Ignore)) {
+    Set-PSReadLineKeyHandler -Chord 'Tab' -Function TabCompleteNext
+    Set-PSReadLineKeyHandler -Chord 'Shift+Tab' -Function TabCompletePrevious
+    Import-Module $ModulePath -Force
+    Assert-Equal 'import installs the Tab handler' 'Complete with skell' (Get-PSReadLineKeyHandler -Chord 'Tab').Function
+    Assert-Equal 'import binds Shift+Tab to MenuComplete' 'MenuComplete' (Get-PSReadLineKeyHandler -Chord 'Shift+Tab').Function
+    Remove-Module Skell
+    Assert-Equal 'remove restores the prior Tab handler' 'TabCompleteNext' (Get-PSReadLineKeyHandler -Chord 'Tab').Function
+    Assert-Equal 'remove restores the prior Shift+Tab handler' 'TabCompletePrevious' (Get-PSReadLineKeyHandler -Chord 'Shift+Tab').Function
+
+    Set-PSReadLineKeyHandler -Chord 'Tab' -BriefDescription 'Existing Tab' -ScriptBlock { }
+    Import-Module $ModulePath -Force
+    Assert-Equal 'import preserves a custom Tab handler' 'Existing Tab' (Get-PSReadLineKeyHandler -Chord 'Tab').Function
+    Remove-Module Skell
+    Assert-Equal 'remove preserves the custom Tab handler' 'Existing Tab' (Get-PSReadLineKeyHandler -Chord 'Tab').Function
+    Set-PSReadLineKeyHandler -Chord 'Tab' -Function TabCompleteNext
+}
+
+Import-Module $ModulePath -Force
+$skell = Get-Module Skell
+Assert-Equal 'prefix ignores case' 'Get-Ch' (& $skell { Get-SkellCommonPrefix @('Get-ChildItem', 'get-chocolate') })
+Assert-Equal 'prefix of disjoint texts is empty' '' (& $skell { Get-SkellCommonPrefix @('alpha', 'beta') })
+Assert-Equal 'visible renders controls' 'a<0x1B>]0;t<0x07>b<0x9D>' `
+  (& $skell { ConvertTo-SkellVisible "a`e]0;t`ab$([char]0x9d)" })
+
+function New-Match([string]$Text, [string]$Type, [string]$Tip = $Text, [string]$Label = $Text) {
+    [System.Management.Automation.CompletionResult]::new($Text, $Label, $Type, $Tip)
+}
+$sep = [System.IO.Path]::DirectorySeparatorChar
+Assert-Equal 'a parameter keeps its tooltip' '[switch] Force' `
+  (& $skell { Get-SkellCompletionDescription $args[0] } (New-Match '-Force' 'ParameterName' '[switch] Force' 'Force'))
+Assert-Equal 'a file drops its path tooltip' '' `
+  (& $skell { Get-SkellCompletionDescription $args[0] } (New-Match './a.txt' 'ProviderItem' '/tmp/a.txt' 'a.txt'))
+Assert-Equal 'an executable drops its path tooltip' '' `
+  (& $skell { Get-SkellCompletionDescription $args[0] } (New-Match 'git' 'Command' '/usr/bin/git'))
+Assert-Equal 'a tooltip folds newlines' 'Get-Item [-Path] <string[]>' `
+  (& $skell { Get-SkellCompletionDescription $args[0] } (New-Match 'Get-Item' 'Command' "`r`nGet-Item [-Path] <string[]>`r`n"))
+Assert-Equal 'a single directory gets a separator' "./d$sep" `
+  (& $skell { Join-SkellCompletion @($args[0]) 'Get-Item ./d' 9 } (New-Match './d' 'ProviderContainer'))
+Assert-Equal 'a quoted directory gets the separator inside the quote' "'./a b$sep'" `
+  (& $skell { Join-SkellCompletion @($args[0]) "Get-Item './a b'" 9 } (New-Match "'./a b'" 'ProviderContainer'))
+Assert-Equal 'cmdlet values join with commas' './a,./b' `
+  (& $skell { Join-SkellCompletion $args 'Get-Item ./' 9 } (New-Match './a' 'ProviderItem') (New-Match './b' 'ProviderItem'))
+Assert-Equal 'empty cmdlet values join with commas' './a,./b' `
+  (& $skell { Join-SkellCompletion $args 'Get-Item ' 9 } (New-Match './a' 'ProviderItem') (New-Match './b' 'ProviderItem'))
+Assert-Equal 'empty cmdlet values after a parameter join with commas' 'a,b' `
+  (& $skell { Join-SkellCompletion $args 'Get-Process -Name ' 18 } (New-Match 'a' 'ParameterValue') (New-Match 'b' 'ParameterValue'))
+Assert-Equal 'values join with spaces after a pipeline ends' './a ./b' `
+  (& $skell { Join-SkellCompletion $args 'Get-Item a; ' 12 } (New-Match './a' 'ProviderItem') (New-Match './b' 'ProviderItem'))
+Assert-Equal 'a dynamic command name joins with spaces' './a ./b' `
+  (& $skell { Join-SkellCompletion $args '& $exe ' 7 } (New-Match './a' 'ProviderItem') (New-Match './b' 'ProviderItem'))
+Assert-Equal 'parameter names join with spaces' '-Force -File' `
+  (& $skell { Join-SkellCompletion $args 'Get-ChildItem -F' 14 } (New-Match '-Force' 'ParameterName') (New-Match '-File' 'ParameterName'))
+Assert-Equal 'command names join with spaces' 'Get-Item Get-Date' `
+  (& $skell { Join-SkellCompletion $args 'Get-' 0 } (New-Match 'Get-Item' 'Command') (New-Match 'Get-Date' 'Command'))
+$native = @(Get-Command -CommandType Application -ErrorAction Ignore | Where-Object Name -Match '^[\w.-]+$' | Select-Object -First 1)[0]
+if ($native) {
+    Assert-Equal 'native command values join with spaces' './a ./b' `
+      (& $skell { Join-SkellCompletion $args[1..2] "$($args[0]) ./" ($args[0].Length + 1) } $native.Name (New-Match './a' 'ProviderItem') (New-Match './b' 'ProviderItem'))
+}
+Remove-Module Skell
+
 Assert-True 'store stayed inside the sandbox' `
   ($env:SKELL_HISTORY.Replace('\', '/').StartsWith($Sandbox.Replace('\', '/')))
 

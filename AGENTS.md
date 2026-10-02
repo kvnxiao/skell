@@ -2,41 +2,52 @@
 
 ## Purpose
 
-Skell records one command history for bash, fish, PowerShell, and zsh. The
-shell hooks append to the shared TSV store without spawning a process. Search
-and zsh completion may invoke `sk`, `gawk`, `eza`, `lsd`, or `ls`.
+Skell records one command history for bash, fish, PowerShell, and zsh, searches
+it with skim, and replaces each shell's `Tab` completion menu with skim. The
+shell hooks append to a shared TSV store without spawning a process. History
+search and the completion menus may run `sk`, `gawk`, `eza`, `lsd`, `ls`, or
+`dir`.
 
-Treat the store format and shell hooks as one cross-shell interface. A format
-change must update every writer, decoder, preview script, migration script,
+Treat the store format and the shell hooks as one cross-shell interface. A
+format change updates every writer, decoder, preview script, migration script,
 and the README in the same change.
+
+Skell needs bash 5.0, fish 4.0, and PowerShell 7.4 on Windows, Linux, and
+macOS. Bash 5.0 supplies `EPOCHSECONDS`, `complete -I`, and a
+`READLINE_POINT` counted in characters; do not add version branches for older
+bash.
 
 ## Layout
 
-- `bash/skell.bash`, `fish/conf.d/skell.fish`, `fish/functions/`,
-  `powershell/Skell.psm1`, and `zsh/init.zsh` record and search history.
-- `zsh/completion.zsh` captures zsh completion matches and presents them
-  through skim.
+Each shell has one entry point that records and searches history:
+
+- `bash/skell.bash`
+- `fish/conf.d/skell.fish` and `fish/functions/`
+- `powershell/Skell.psm1`
+- `zsh/init.zsh`
+
+Each shell presents its own completion matches through skim:
+
+- `bash/completion.bash` wraps each compspec to record readline's matches
+  during a `Tab` macro.
 - `fish/functions/_skell_complete*.fish`, `_skell_commandline.fish`,
   `_skell_unclosed_quote.fish`, and `_skell_visible.fish` present fish's
-  `complete -C` matches through skim.
-- `_skell_skim` runs skim for fish history search and completion.
-  `_skell_scratch` creates and empties scratch files, and `_skell_ready` checks
-  for `sk` and `gawk` once per session.
-- `share/rank.awk` ranks distinct commands by frecency.
-- `share/preview-*.awk` render skim previews.
-- `share/migrate-atuin.sh` and `share/migrate-atuin.awk` import atuin history.
-- `share/build-fish-plugin.sh` assembles the `fish-releases` branch.
+  `complete -C` matches. `_skell_skim` runs skim for fish history search and
+  completion.
+- `Invoke-SkellComplete` in `powershell/Skell.psm1` presents `TabExpansion2`
+  matches.
+- `zsh/completion.zsh` captures zsh's `compadd` matches.
 
-## fish plugin branch
+Each shell checks for `sk` and `gawk` once per session with `_skell_ready`
+(bash, fish, zsh) or `Test-SkellReady` (PowerShell). `_skell_scratch` (fish,
+zsh) and `_skell_empty` (bash) create and empty scratch files.
 
-fisher is the only supported fish installer. It copies only a plugin's root
-`conf.d/`, `functions/`, `completions/`, and `themes/`. Build `fish/` as the
-root of `fish-releases` and put `share/*.awk` under `functions/skell-share`.
-`_skell_history` appends `skell-share` to `(status dirname)`. Fish reports
-`(status dirname)` as the directory from which it autoloaded the function.
-Before `.github/workflows/fish-releases.yml` force-pushes the branch, it runs
-`tests/plugin-fish.sh`. The test fails when the build omits an awk script or
-uses an awk directory name that differs from the fish sources.
+The shared scripts live in `share/`:
+
+- `rank.awk` ranks distinct commands by frecency.
+- `preview-*.awk` render skim previews.
+- `migrate-atuin.sh` and `migrate-atuin.awk` import atuin history.
+- `build-fish-plugin.sh` assembles the `fish-releases` branch.
 
 ## Store contract
 
@@ -45,42 +56,122 @@ uses an awk directory name that differs from the fish sources.
 - Escape backslashes before newlines, tabs, and carriage returns. Decode the
   doubled backslashes before the other escape sequences.
 - Keep the encoded record at or below 1000 bytes before its final newline, and
-  append the record with one write. Treat limit changes as concurrency-sensitive
-  and document their platform and filesystem assumptions.
-- Preserve duplicate commands because each occurrence contributes to
-  frecency.
+  append it with one write. Treat a limit change as concurrency-sensitive and
+  document its platform and filesystem assumptions.
+- Preserve duplicate commands; each occurrence contributes to frecency.
 - Exclude commands whose typed form starts with a space.
 - Preserve the command's exit status across prompt hooks.
-- Use a temporary `SKELL_DATA_DIR` and `SKELL_HISTORY` in tests. Never read or
-  write the developer's live history store.
 
-## Implementation rules
+## Process cost
 
-- Keep recording hooks fork-free. No external utility runs on the prompt path.
-  Allow command substitutions around builtins or shell functions when the shell
-  evaluates them in-process. Do not use command substitutions around external
-  commands.
-- Keep the fish completion path fork-free until skim starts. Empty scratch
-  files with a builtin instead of `rm` and leave deletion to the exit hook.
-- Keep shell-specific implementations direct. Do not introduce a shared
-  runtime dependency to remove small amounts of duplication.
-- Load `zsh/completion.zsh` after `compinit`, and preserve zsh's completers,
-  matcher lists, styles, prefixes, suffixes, and quoting rules.
+Process startup is slow under MSYS2, and every fork on an interactive path
+delays the prompt or the key press. Keep interactive paths in-process:
+
+- Keep recording hooks fork-free; no external utility runs on the prompt path.
+  Command substitutions around builtins or shell functions are allowed when the
+  shell evaluates them in-process; command substitutions around external
+  commands are not.
+- Keep the fish completion path fork-free until skim starts. In bash, keep
+  skell's own code on the `Tab` path fork-free until `gawk` renders the menu;
+  completion functions may fork as they do under native `Tab`.
+- Empty scratch files with a builtin instead of `rm` in bash, fish, and zsh,
+  and leave deletion to the exit hook. For example, write `: >| "$file"`.
+
+Prefer fish builtins over external commands when editing `.fish` files. Choose
+the simplest builtin that preserves behavior; for example, iterate with
+`for item in $items` instead of generating indices with `seq`:
+
+| Operation                        | External tool          | Prefer in fish                                         |
+| -------------------------------- | ---------------------- | ------------------------------------------------------ |
+| Iterate over list elements       | `seq` for indices      | `for item in $items`                                   |
+| Replace literal text             | `sed`                  | `string replace -a -- old new "$value"`                |
+| Replace text with a regex        | `sed`                  | `string replace -ar -- '[0-9]+' NUMBER "$value"`       |
+| Check a regex match              | `grep -q`              | `string match -rq -- pattern "$value"`                 |
+| Extract a colon-delimited field  | `cut`, simple `awk`    | `string split -f2 -- : "$value"`                       |
+| Convert case                     | `tr`                   | `string lower -- "$value"`, `string upper -- "$value"` |
+| Trim whitespace                  | `sed`, `awk`           | `string trim -- "$value"`                              |
+| Extract a filename or directory  | `basename`, `dirname`  | `path basename -- "$file"`, `path dirname -- "$file"`  |
+| Resolve an absolute path         | `realpath`             | `path resolve -- "$file"`                              |
+| Count list elements              | `wc` over a pipeline   | `count $items`                                         |
+| Check list membership            | `grep` over a pipeline | `contains -- "$target" $items`                         |
+| Calculate a needed numeric value | `expr`, simple `bc`    | `math "$n + 1"`                                        |
+| Read text into one variable      | `cat`                  | `set -l text (string collect -aN < file)`              |
+
+Check behavior before replacing an external tool. For example, `count` counts
+list elements rather than file lines, and `string collect -aN` preserves empty
+input and trailing newlines. Keep `gawk` for substantial streaming
+transformations instead of building a long shell loop.
+
+## Shell rules
+
+Keep each shell's implementation direct. Do not introduce a shared runtime
+dependency to remove small amounts of duplication.
+
+Keep skell working under the user's shell options and rc habits:
+
+- Write scratch files with `>|` in bash and zsh, which `noclobber` would
+  otherwise refuse to overwrite.
+- Make each entry point safe to source again; users re-source their rc files.
+  For example, keep existing maps and chained traps instead of resetting them.
+
+### bash
+
+- Declare skell's globals with `declare -g`; a user may source
+  `bash/skell.bash` from inside a function. For example, write
+  `declare -gA _skell_cw_func=()`.
+- Declare no locals in a function that evaluates the user's chained trap; the
+  trap would see them in place of its own globals.
+- Keep `_skell_cw_run` returning the current word unchanged while the menu
+  records matches; the macro's `complete` step must insert nothing.
+- Match native `Tab` exactly: the menu offers the matches, quoting, and
+  insertion that bash would produce. Compare each change against bash without
+  skell in a pty, both with and without bash-completion loaded.
+
+### fish
+
+fisher is the only supported fish installer. It copies only a plugin's root
+`conf.d/`, `functions/`, `completions/`, and `themes/`. Build `fish/` as the
+root of `fish-releases` and put `share/*.awk` under `functions/skell-share`.
+`_skell_history` appends `skell-share` to `(status dirname)`, which fish
+reports as the directory from which it autoloaded the function.
+
+Before `.github/workflows/fish-releases.yml` force-pushes the branch, it runs
+`tests/plugin-fish.sh`. The test fails when the build omits an awk script or
+uses an awk directory name that differs from the fish sources.
+
+### PowerShell
+
 - Start skim from a PSReadLine key handler through
-  `System.Diagnostics.Process`. Inherit stderr and keep
-  `[Console]::OutputEncoding` set to UTF-8 until the redraw completes. When a
-  key handler invokes a native command, the handler's pipeline collects and
-  discards every stream. Skim draws its interface on stderr.
-- Use GNU awk features deliberately; the project requires `gawk`.
-- Keep inline comments only for cross-shell format constraints, shell or OS
-  behavior, ordering requirements, and wrong-looking compatibility choices.
+  `System.Diagnostics.Process`, and inherit stderr; skim draws its interface
+  there. A key handler's pipeline collects and discards every stream of a
+  native command it invokes.
+- Keep `[Console]::OutputEncoding` set to UTF-8 until the redraw completes.
+- Write files that `gawk` reads with LF line endings.
+  `[System.IO.File]::WriteAllLines` writes CRLF on Windows, and a POSIX `gawk`
+  keeps the CR on the last field.
+
+### zsh
+
+Load `zsh/completion.zsh` after `compinit`. Preserve zsh's completers, matcher
+lists, styles, prefixes, suffixes, and quoting rules.
+
+### awk
+
+Use GNU awk features deliberately; the project requires `gawk`. Under a native
+Windows `gawk`, `PROCINFO["platform"]` is `"mingw"` and pipes run through
+`cmd.exe`.
+
+## Comments
+
+Keep inline comments only for cross-shell format constraints, shell or OS
+behavior, ordering requirements, and wrong-looking compatibility choices.
 
 ## Verification
 
 Run the applicable commands from the repository root with bash 5.0 or newer
 first on `PATH`; on macOS, install Homebrew's bash. The command patterns select
-files by directory and extension. Adding a file under a covered directory
-does not require editing this list:
+files by directory and extension, so a new file under a covered directory
+needs no edit here:
 
 ```sh
 bash -n bash/*.bash share/*.sh tests/*.sh tests/lib/*.sh
@@ -93,67 +184,74 @@ for script in share/*.awk; do gawk -f "$script" </dev/null >/dev/null; done
 bash tests/run-all.sh
 ```
 
-`tests/run-all.sh` covers the codec in all five implementations, the record
-fitter's boundaries, the fish completion menu's prefix, insertion, buffer, and
-control-rendering helpers, the completion preview's choice of directory lister,
-each recording hook's output, the files fish loads from the built plugin, fish's
-rewrite of an inherited Windows store path, the atuin importer's failure paths,
-store permissions, and the PowerShell module's lifecycle. It skips suites for
-unavailable shells and names each skipped suite.
-When MSYS2 is unavailable, `tests/path-fish.sh` reports a skip.
+`tests/run-all.sh` runs every suite with a temporary `SKELL_DATA_DIR` and
+`SKELL_HISTORY`, skips suites for unavailable shells, and names each skip. Run
+`tests/lifecycle-pwsh.ps1` through it; the script needs the module path and
+sandbox that `run-all.sh` passes. The suites cover:
 
-No suite drives a real line editor. Bash records under `bash -i`; zsh and fish
-are called at the hook boundary with the arguments their editors pass because
-the test environment cannot provide a pty on every supported platform.
-PowerShell's `Get-History` is empty outside an interactive session, so
-`Write-SkellRecord` cannot be driven. The suite covers the store opener and
-fitter instead. Exercise a key binding, a widget, or PowerShell's own recording
-by hand.
+- the codec in all five implementations and the record fitter's boundaries;
+- each recording hook's output and store permissions;
+- the fish completion menu's prefix, insertion, buffer, and control-rendering
+  helpers;
+- the bash menu's quoting, insertion, and compspec wrapping;
+- the PowerShell menu's prefix, description, and join helpers, and the
+  module's lifecycle;
+- the completion preview's choice of directory lister;
+- the files fish loads from the built plugin and fish's rewrite of an
+  inherited Windows store path (skipped without MSYS2);
+- the atuin importer's failure paths.
 
-A change to the escape grammar or the record budget belongs in
-`tests/lib/vectors.tsv`. Every implementation is measured against this vector
-set. A divergent writer fails instead of storing a record another shell cannot
-decode.
+No suite drives a real line editor, because the test environment cannot
+provide a pty on every supported platform. Bash records under `bash -i`; zsh
+and fish are called at the hook boundary with the arguments their editors
+pass. PowerShell's `Get-History` is empty outside an interactive session, so
+the suite covers the store opener and fitter instead of `Write-SkellRecord`.
+Exercise key bindings, widgets, menus, and PowerShell's recording by hand.
+
+When writing tests:
+
+- Never read or write the developer's live history store.
+- Put escape-grammar and record-budget changes in `tests/lib/vectors.tsv`.
+  Every implementation is measured against it, so a divergent writer fails
+  instead of storing a record another shell cannot decode.
+- Write non-ASCII fixture bytes as octal escapes, such as `$'\302\235'`.
+  Bash expands `$'\u009d'` only in a UTF-8 locale.
+- Use cmdlets and executables present on every platform. For example, use
+  `Get-Process -Name` rather than the Windows-only `Get-Service`.
 
 ## Ad hoc shell scripts on Windows
 
-A native Windows binary ignores the MSYS signal that `timeout` sends.
-`timeout N script -q -c '…'` therefore does not bound `script` or the processes
-it starts. Driving `sk` or an interactive shell through a pty leaves the
-wrapper and its children running after the timeout expires, and they accumulate
-across a session. End them with `Stop-Process -Id <pid> -Force` from PowerShell;
-matching on process name alone would also kill the interactive shells the user
-is working in.
+A native Windows binary ignores the MSYS signal that `timeout` sends, so
+`timeout N script -q -c '…'` does not stop `script` or the processes it
+starts. Driving `sk` or an interactive shell through a pty leaves the wrapper
+and its children running, and they accumulate across a session. End them with
+`Stop-Process -Id <pid> -Force` from PowerShell; matching on process name would
+also kill the user's interactive shells.
 
-MSYS2's zsh and Git-for-Windows Bash run in separate Cygwin runtimes.
-`env VAR=x zsh …` reaches zsh with `VAR` unset. A harness that prefixes zsh
-with `env VAR=x` tests the real configuration instead of the fixture. Write
-test configuration to a file and source it as the session's first command.
+MSYS2's zsh and Git-for-Windows Bash run in separate Cygwin runtimes, and the
+runtimes differ in ways that break fixtures:
 
-The two runtimes resolve `/tmp` differently. Git-for-Windows mounts `/tmp` as
-`usertemp` at `%LOCALAPPDATA%\Temp`; MSYS2 roots at `C:/msys64` and has no
-`/tmp` entry. The same POSIX path therefore identifies different directories in
-the two runtimes. MSYS2 zsh and fish report `No such file or directory` for a
-path that Git Bash's `ls` resolves. `TMP` and `TEMP` do not govern the mapping;
-the mount in `/etc/fstab` does.
-
-A mixed `C:/...` path from `cygpath -m` does not work for MSYS2 redirection.
-MSYS2 fish can stat the path but cannot redirect to it, and reports `Path does
-not exist` for a directory that `test -d` accepts. Use a native path for the
-fixture: `C:/msys64/tmp` is `/tmp` to MSYS2 zsh and fish,
-`/c/msys64/tmp` to the agent's Bash, and `C:/msys64/tmp` to PowerShell. All four
-read and write it.
-
-`mount` and the other utilities resolve paths using the invoking runtime.
-Running `zsh -c 'mount'` from agent Bash reports Bash's mount table, not
-MSYS2's. Read runtime-specific configuration from a shell started by that
-runtime.
-
-An MSYS2 shell started by an agent inherits the agent's `PATH`. Git-for-Windows
-precedes `/usr/bin` in that path. `mkdir -p /tmp/x` therefore invokes
-Git-for-Windows' `mkdir` against Git-for-Windows' `/tmp`; MSYS2 cannot see the
-resulting directory. Prepend `/usr/bin:/bin` in the fixture that a zsh or fish
-session sources before anything external runs.
+- `env VAR=x zsh …` reaches zsh with `VAR` unset, so a harness that sets
+  variables with `env` tests the real configuration instead of the fixture.
+  Write test configuration to a file and source it as the session's first
+  command.
+- Git-for-Windows mounts `/tmp` as `usertemp` at `%LOCALAPPDATA%\Temp`; MSYS2
+  roots at `C:/msys64` and has no `/tmp` entry. The same POSIX path names
+  different directories, and MSYS2 zsh and fish report `No such file or
+  directory` for a path Git Bash resolves. The mount in `/etc/fstab` governs
+  the mapping, not `TMP` or `TEMP`.
+- MSYS2 fish can stat a mixed `C:/...` path from `cygpath -m` but cannot
+  redirect to it (`Path does not exist`). Use `C:/msys64/tmp` for fixtures: it
+  is `/tmp` to MSYS2 zsh and fish, `/c/msys64/tmp` to the agent's Bash, and
+  `C:/msys64/tmp` to PowerShell, and all four read and write it.
+- `mount` and other utilities resolve paths with the invoking runtime;
+  `zsh -c 'mount'` from agent Bash prints Bash's mount table. Read
+  runtime-specific configuration from a shell started by that runtime.
+- An MSYS2 shell started by an agent inherits the agent's `PATH`, where
+  Git-for-Windows precedes `/usr/bin`. `mkdir -p /tmp/x` then runs
+  Git-for-Windows' `mkdir` against its own `/tmp`. Prepend `/usr/bin:/bin` in
+  the fixture that a zsh or fish session sources before anything external
+  runs.
 
 A Git-for-Windows clone sets `core.filemode` to false, so git does not record
 a new script's executable bit. Invoke a repository script through `bash`.
