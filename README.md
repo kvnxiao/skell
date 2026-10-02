@@ -1,16 +1,23 @@
 # skell
 
-Skell gives bash, fish, PowerShell, and zsh one shared command history. It uses
-[skim](https://github.com/skim-rs/skim) for search and replaces each shell's
-tab-completion menu.
+Skell is skim for your shell: it puts [skim](https://github.com/skim-rs/skim),
+a fuzzy finder, behind the two keys you press most when working in a terminal.
+`Ctrl+R` searches every command you have run, and `Tab` lists the shell's own
+completions in a filterable menu. Skell works the same way in bash, fish,
+PowerShell, and zsh on Windows, Linux, and macOS, and it keeps out of the way
+of the prompt: recording a command starts no process.
 
-Each shell appends to the same file without starting a process while recording.
-History search starts skim once and runs the preview helper for the candidate
-under the cursor.
+- **Shared history.** Every shell appends to one history file, so a command run
+  in zsh is one `Ctrl+R` away in PowerShell. Each record keeps the time, the
+  working directory, the exit status, and the shell that ran it.
+- **History search.** `Ctrl+R` opens skim over your history, ranked by how
+  often and how recently you ran each command. A preview pane shows the details
+  of the command under the cursor.
+- **Completion menu.** `Tab` sends the shell's native completion matches
+  through skim, so your existing completions keep working and gain fuzzy
+  filtering, descriptions, multi-select, and a directory preview.
 
 ## Requirements
-
-Skell supports bash, fish, PowerShell, and zsh on Windows, Linux, and macOS:
 
 | shell      | needs | tested against |
 | ---------- | ----- | -------------- |
@@ -19,87 +26,86 @@ Skell supports bash, fish, PowerShell, and zsh on Windows, Linux, and macOS:
 | PowerShell | 7.4   | 7.6            |
 | zsh        |       | 5.9            |
 
-Each minimum version supplies features skell uses:
-
-- bash 5.1: a `HISTCMD` that advances inside `PROMPT_COMMAND`, which the
-  recording hook compares to detect a new command. Bash 5.0 reports 1 there.
-  Bash 5.0 also supplies `EPOCHSECONDS`, `complete -I`, and a `READLINE_POINT`
-  counted in characters.
-- fish 4.0: `path mtime` and the `ctrl-r` key notation used by the binding.
-- PowerShell 7.4: the .NET filesystem APIs used to apply Unix modes.
-
-The zsh integration uses parameter flags and hooks available before zsh 5.9.
-
 macOS ships bash 3.2 as `/bin/bash`; install bash 5 with `brew install bash`.
 Under a bash older than 5.1, `bash/skell.bash` prints a warning and loads
 nothing.
 
-- [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6. The
-  `accept(edit)` and `accept(run)` binds are skim's current syntax; skim also
-  accepts their deprecated spelling.
-- `gawk` for ranking and previews (`mktime`, `systime`, and `PROCINFO` are GNU
-  extensions). Windows has no built-in awk, and neither MSYS2 nor Git for
-  Windows puts its `usr\bin` on the native `PATH`. On Windows, the PowerShell
-  module uses MSYS2's `usr\bin\gawk.exe`, then Git for Windows'. It finds
-  MSYS2 through the installer's uninstall entry, falling back to `C:\msys64`,
-  and Git through the installer's registry key, falling back to `git` on
-  `PATH`. It ignores `gawk` on `PATH`: a native Windows build, such as
-  Scoop's, runs previews through `cmd.exe`, which expands a defined `%NAME%`
-  and cannot pass characters outside the ANSI code page. Set `SKELL_GAWK` to
-  override these lookups; the other shells resolve `gawk` only through `PATH`.
-- [eza](https://github.com/eza-community/eza) or
+Skell also needs these programs:
+
+- [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6.
+- `gawk` for ranking and previews. Other awk implementations lack the GNU
+  extensions Skell uses (`mktime`, `systime`, and `PROCINFO`).
+- Optionally, [eza](https://github.com/eza-community/eza) or
   [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
-  preview; by default, the preview uses `ls` without either
+  preview. Without either, the preview uses `ls`.
+
+On Windows, bash, fish, and zsh find `gawk` on `PATH`. Windows has no built-in
+awk, and neither MSYS2 nor Git for Windows puts its `usr\bin` on the native
+`PATH`, so the PowerShell module looks for `gawk` itself:
+
+1. MSYS2's `usr\bin\gawk.exe`, found through the installer's uninstall entry
+   or at `C:\msys64`.
+2. Git for Windows' `usr\bin\gawk.exe`, found through the installer's registry
+   key or through `git` on `PATH`.
+
+The module ignores `gawk` on `PATH`. A native Windows build, such as Scoop's,
+runs previews through `cmd.exe`, which expands a defined `%NAME%` and cannot
+pass characters outside the ANSI code page. Set `SKELL_GAWK` to the path of a
+`gawk` to override the lookup.
 
 ## Install
 
-Clone the repository, then wire the shells you use:
+Clone the repository, then wire up each shell you use:
 
 ```sh
 git clone https://github.com/kvnxiao/skell ~/github/skell
 ```
 
-**fish** — [fisher](https://github.com/jorgebucaran/fisher) does not install a
-plugin's `share/` directory. The generated `fish-releases` branch therefore puts
-the awk scripts in `functions/skell-share`.
-Install fish support from `fish-releases`:
+**fish** — install the `fish-releases` branch with
+[fisher](https://github.com/jorgebucaran/fisher):
 
 ```fish
 fisher install kvnxiao/skell@fish-releases
 ```
 
-**zsh** — [zim](https://github.com/zimfw/zimfw) treats an absolute path as an
-external module and does not install or update it. In `.zimrc`, load it after
-`compinit` and before `fast-syntax-highlighting`:
+fisher does not install a plugin's `share/` directory, so the generated
+`fish-releases` branch puts the awk scripts in `functions/skell-share`.
+
+**zsh** — with [zim](https://github.com/zimfw/zimfw), add the module to
+`.zimrc` after `compinit` and before `fast-syntax-highlighting`:
 
 ```zsh
 zmodule ~/github/skell/zsh -n skell
 ```
 
-Without zim, source `zsh/init.zsh` from `.zshrc`.
+zim treats an absolute path as an external module and does not install or
+update it; run `git pull` in the clone to update. Without zim, source
+`zsh/init.zsh` from `.zshrc` after `compinit`.
 
-**bash** — source it before starship. Starship moves `PROMPT_COMMAND` into
-`STARSHIP_PROMPT_COMMAND` and runs it with `$?` restored:
+**bash** — source it from `.bashrc` before starship:
 
 ```bash
 [ -f ~/github/skell/bash/skell.bash ] && . ~/github/skell/bash/skell.bash
 ```
 
-**PowerShell** — import it after starship and zoxide. The wrapper defined last
-runs first while `$?` still records the user's command:
+Starship moves `PROMPT_COMMAND` into `STARSHIP_PROMPT_COMMAND` and runs it with
+`$?` restored, so Skell still records each command's exit status.
+
+**PowerShell** — import it from your profile after starship and zoxide:
 
 ```powershell
 Import-Module "$HOME\github\skell\powershell\Skell.psm1"
 ```
 
-`Remove-Module Skell` restores the prompt, PSReadLine history handler, and prior
-`Ctrl+R`, `Tab`, and `Shift+Tab` bindings. When one of those chords already has
-a custom handler, Skell preserves it and does not install its own binding.
-Removing Skell does not replace a custom handler installed after Skell.
+The prompt wrapper defined last runs first, while `$?` still records your
+command's exit status. When `Ctrl+R`, `Tab`, or `Shift+Tab` already has a
+custom handler, Skell keeps it and does not install its own binding.
+`Remove-Module Skell` restores the prompt, the PSReadLine history handler, and
+the prior `Ctrl+R`, `Tab`, and `Shift+Tab` bindings. It does not replace a
+custom handler installed after Skell.
 
-History search and the completion menu require `sk` and `gawk`. If either is
-missing, each shell warns once per session, and `Ctrl+R` and `Tab` fall back to
-the shell's own history search and completion.
+If `sk` or `gawk` is missing, each shell warns once per session, and `Ctrl+R`
+and `Tab` fall back to the shell's own history search and completion.
 
 ## History search
 
@@ -110,14 +116,21 @@ the shell's own history search and completion.
 | `Alt+Enter` | put the command on the line and run |
 | `Esc`       | leave the line untouched            |
 
-Because a `bind -x` handler cannot submit a line, bash `Alt+Enter` asks the
+Skell ranks distinct commands by frecency. Each time you ran a command adds to
+its score by age: 4 within the hour, 2 within the day, 0.5 within the week, and
+0.25 beyond. Ties go to the more recent command. The ranking runs when you open
+the search and keeps no state of its own.
+
+In history and completion text, skim shows control characters (C0 and C1
+controls and DEL) as `<0xNN>`. The command placed on the line keeps the original
+characters.
+
+A bash `bind -x` handler cannot submit a line, so in bash `Alt+Enter` asks the
 terminal for a status report and binds the reply to `accept-line`. If the
-terminal does not answer DSR, the command remains on the line for `Enter`.
+terminal does not answer that report, the command stays on the line for
+`Enter`.
 
 ## Completion menu
-
-Skell binds `Tab` in every shell and sends the shell's own completion matches
-through skim.
 
 | key          | action                         |
 | ------------ | ------------------------------ |
@@ -127,25 +140,24 @@ through skim.
 | `Enter`      | insert the selection           |
 | `Esc`        | leave the line untouched       |
 
-Before opening the menu, Skell inserts an unambiguous prefix. Completing `sub`
-against `subdir-one` and `subdir-two` inserts `subdir-`; the next `Tab` opens the
-menu. A single match is inserted without the menu.
+Before opening the menu, Skell inserts any unambiguous prefix. Completing `sub`
+against `subdir-one` and `subdir-two` inserts `subdir-`, and the next `Tab`
+opens the menu. A single match is inserted without the menu. Selecting several
+matches inserts them separated by spaces; PowerShell sometimes joins them with
+commas instead, as its section below describes.
 
-Selecting multiple matches inserts them with spaces between them, except in
-PowerShell as described below.
+Outside the menu, `Shift+Tab` runs the shell's native completion:
 
-Outside the menu, `Shift+Tab` runs the shell's native completion: fish's pager,
-zsh's completion widget, readline's `complete` in bash, and PSReadLine's
-`MenuComplete` in PowerShell. In zsh and bash, Skell binds `Shift+Tab` only
-when it has no binding.
+- bash: readline's `complete`.
+- fish: fish's pager.
+- PowerShell: PSReadLine's `MenuComplete`.
+- zsh: zsh's completion widget.
 
-### Settings
+In bash and zsh, Skell binds `Shift+Tab` only when it has no binding.
 
-`SKELL_COMPLETE=off` leaves `Tab` to the shell and keeps history search. Bash
-reads it when `bash/skell.bash` loads; fish, PowerShell, and zsh read it on each
-`Tab`.
+### Preview
 
-`SKELL_COMPLETE_PREVIEW` selects the preview:
+`SKELL_COMPLETE_PREVIEW` selects what the preview pane shows:
 
 | value                   | preview                                                        |
 | ----------------------- | -------------------------------------------------------------- |
@@ -155,13 +167,11 @@ reads it when `bash/skell.bash` loads; fish, PowerShell, and zsh read it on each
 
 Bash has no match descriptions, so `description` behaves as `directory` there.
 
-On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`. For a
-directory it also starts the directory lister through `sh`, or through
-`cmd.exe` under a native Windows `gawk`. Set `off` to skip them.
+On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`, and a
+directory also starts the directory lister. Set `SKELL_COMPLETE_PREVIEW=off` to
+skip them.
 
-### Directory preview
-
-The preview lists a directory with the command that `SKELL_COMPLETE_LS` selects:
+`SKELL_COMPLETE_LS` selects the directory lister:
 
 | value          | lister                                        |
 | -------------- | --------------------------------------------- |
@@ -170,30 +180,43 @@ The preview lists a directory with the command that `SKELL_COMPLETE_LS` selects:
 | `lsd`          | `lsd`                                         |
 | `ls`           | `ls`                                          |
 
-A lister named by `SKELL_COMPLETE_LS` has no fallback: when it is not on
-`PATH`, the preview shows the shell's error. Any other value makes the preview
-print an error instead of a listing. The preview reads the variable from the
-environment, so export it: `export SKELL_COMPLETE_LS=lsd` in bash and zsh,
-`set -gx SKELL_COMPLETE_LS lsd` in fish, or `$env:SKELL_COMPLETE_LS = 'lsd'`
-in PowerShell.
+A named lister has no fallback: when it is not on `PATH`, the preview shows the
+shell's error. Any other value makes the preview print an error instead of a
+listing. The preview reads the variable from the environment, so export it:
 
-When `SKELL_GAWK` names a native Windows `gawk`, such as Scoop's, the lister
-runs through `cmd.exe`. There the unset default tries `eza`, then `lsd`, then
-`dir /b`. A directory does not list when its path has characters outside the
-ANSI code page or the name of a defined variable between `%` signs.
+- bash and zsh: `export SKELL_COMPLETE_LS=lsd`
+- fish: `set -gx SKELL_COMPLETE_LS lsd`
+- PowerShell: `$env:SKELL_COMPLETE_LS = 'lsd'`
 
-### zsh
+When `SKELL_GAWK` names a native Windows `gawk`, the lister runs through
+`cmd.exe`, and the unset default tries `eza`, then `lsd`, then `dir /b`. There
+a directory does not list when its path has characters outside the ANSI code
+page or the name of a defined variable between `%` signs.
 
-Zsh's completers, matcher lists, and `:completion:*` styles still supply the
-candidates. Skell sets `zstyle ':completion:*' list-grouped false` so matches
-that share a description stay on separate rows.
+### Turning the menu off
 
-When matches span groups, Skell shows each group description beside its matches
-in a dim column. Descriptions are capped at 20 characters and longer text is
-elided. Skell omits the column when one group supplies all matches. Queries
-filter matches, not group descriptions: `co` does not select every entry in a
-group named `commands`. The `format` style supplies the group text. A value such
-as `Completing %d` fills the column; bare `%d` leaves it empty.
+`SKELL_COMPLETE=off` leaves `Tab` to the shell and keeps history search. Bash
+reads it when `bash/skell.bash` loads; fish, PowerShell, and zsh read it on each
+`Tab`.
+
+### bash
+
+Readline does not expose its matches to a key binding, so `Tab` runs a macro
+that calls readline's own `complete`. Skell wraps each compspec, including
+bash-completion's lazily loaded ones, to record the matches. Readline still
+splits the words and runs the completion functions, so the menu offers the same
+matches as native `Tab`.
+
+- Skell quotes filename matches as readline does: inside an open quote, or with
+  backslashes.
+- A directory match gets a trailing `/`; other finished matches get a space
+  unless the compspec sets `nospace`.
+- When no `-D`, `-E`, or `-I` compspec exists, Skell adds one to receive
+  default, empty-line, and command-name completion. Each falls back to bash's
+  own completion when the menu is not running.
+- Readline lists matches on a second `Tab` only after its own `complete`. When
+  the menu records nothing, as at a continuation prompt, a second `Tab` does
+  not list them; `Shift+Tab` twice does.
 
 ### fish
 
@@ -209,25 +232,6 @@ candidates, not descriptions.
   `.`, `,`, or `-`, matching fish. A space also closes a quote the match left
   open.
 
-### bash
-
-Readline does not expose its matches to a key binding, so `Tab` runs a macro
-that calls readline's own `complete`. Skell wraps each compspec, including
-bash-completion's lazily loaded ones, to record the matches. Readline still
-splits the words and runs the completion functions, so the menu offers native
-`Tab`'s matches.
-
-- Skell quotes filename matches as readline does: inside an open quote, or with
-  backslashes.
-- A directory match gets a trailing `/`; other finished matches get a space
-  unless the compspec sets `nospace`.
-- When no `-D`, `-E`, or `-I` compspec exists, Skell adds one to receive
-  default, empty-line, and command-name completion. Each falls back to bash's
-  own completion when the menu is not running.
-- Readline lists matches on a second `Tab` only after its own `complete`. When
-  the menu records nothing, as at a continuation prompt, a second `Tab` does
-  not list them; Shift+Tab twice does.
-
 ### PowerShell
 
 `TabExpansion2` supplies the matches in-process, so argument completers and
@@ -239,11 +243,65 @@ for files, directories, and executables, whose tooltips repeat their path.
   in `Get-ChildItem ./a,./b`. Parameter names, command names, and arguments to
   native executables join with spaces.
 
-## Store
+### zsh
+
+Zsh's completers, matcher lists, and `:completion:*` styles still supply the
+candidates. Skell sets `zstyle ':completion:*' list-grouped false` so matches
+that share a description stay on separate rows.
+
+When matches span groups, Skell shows each group description beside its matches
+in a dim column. Descriptions are capped at 20 characters and longer text is
+elided. Skell omits the column when one group supplies all matches. Queries
+filter matches, not group descriptions: `co` does not select every entry in a
+group named `commands`. The `format` style supplies the group text. A value such
+as `Completing %d` fills the column; bare `%d` leaves it empty.
+
+## Your history
 
 Skell stores history in `$XDG_DATA_HOME/skell/history.tsv` or, when
-`XDG_DATA_HOME` is unset or empty, in `~/.local/share/skell/history.tsv`. The file
-contains one tab-separated record per line:
+`XDG_DATA_HOME` is unset or empty, in `~/.local/share/skell/history.tsv`. Set
+`SKELL_DATA_DIR` to move the `skell` directory, which also has each session's
+scratch files, or `SKELL_HISTORY` to move only the history file. On Windows,
+bash, fish, and zsh use MSYS2 paths; PowerShell uses a native Windows path.
+
+### What gets recorded
+
+Skell records every command except those you type with a leading space. Shell
+history configuration cannot re-enable leading-space commands, and Skell adds
+no other denylist. Each shell's own history filters still apply, and they
+reject commands before Skell sees them:
+
+- Bash preserves `HISTCONTROL` and `HISTIGNORE`; Skell adds `ignorespace` to
+  `HISTCONTROL` only when neither `ignorespace` nor `ignoreboth` is present.
+- Fish excludes leading-space commands by default.
+- PowerShell calls an existing `AddToHistoryHandler` before its own handler.
+- Zsh sets `HIST_IGNORE_SPACE` without changing its other history options.
+
+Skell keeps every occurrence of a command, since each one adds to its frecency
+score.
+
+### Who can read it
+
+On Linux and macOS, Skell creates the directory with mode `0700` and the file
+with mode `0600`. When the PowerShell module creates the store on Windows, it
+replaces inherited ACL entries with one entry for your account.
+
+Cygwin and MSYS2 mount NTFS with `noacl`, which discards the umask. Bash, fish,
+and zsh on Windows cannot set a mode, so a store they create keeps the
+permissions the parent directory grants. Set an existing store's ACL with
+`icacls`.
+
+### Directories are machine-local
+
+A record has the directory but no machine identifier. When you sync the file to
+another machine, a recorded path may name a directory that does not exist there
+or a different directory entirely. On Windows, every shell records the MSYS2
+form (`/c/Users/...`); PowerShell converts its native path to match. A location
+outside the FileSystem provider, such as a registry path, records as `unknown`.
+
+### File format
+
+The file has one tab-separated record per line:
 
 ```
 <epoch>	<directory>	<exit>	<shell>	<command>
@@ -255,129 +313,61 @@ carriage return become `\n`, `\t`, and `\r`. These escapes keep one record per
 line. The decoder consumes `\\` before it decodes the other escape sequences,
 so a command containing a literal `\n` and a command containing a newline
 round-trip to different strings. Unrecognized escapes remain unchanged. NUL is
-outside the contract because no supported line editor produces it.
+outside the format because no supported line editor produces it.
 
-Before passing history or completion text to skim, Skell renders C0 and C1
-controls and DEL as `<0xNN>`. History selection reads the exact command from a
-separate raw ranked file under `SKELL_DATA_DIR`, so the visible markers do not
-change the command placed on the line.
+Skell caps each record's length, and a trailing `\+` marks a record cut by the
+cap. If the directory alone is long enough to leave no room for the command,
+the directory is stored as `unknown` and the command is kept whole.
 
-A trailing `\+` marks a record cut by the length cap. If the directory alone is
-long enough to leave no room for the command, the directory is stored as
-`unknown` and the command is kept whole.
+## How shells share the file
 
-Set `SKELL_HISTORY` to move the file. Set `SKELL_DATA_DIR` to move its
-containing directory. On Windows, bash, fish, and zsh use MSYS2 paths; PowerShell
-uses a native Windows path.
-
-Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it.
-Before opening the store, Skell rewrites the drive-letter path to its mounted
-MSYS2 path. Bash and zsh append using their configured paths.
-
-### Who can read it
-
-The store contains the commands recorded by Skell. On Linux and macOS, Skell
-creates the directory with mode `0700` and the file with mode `0600`. When the
-PowerShell module creates the store on Windows, it replaces inherited ACL
-entries with one entry for your account.
-
-Cygwin and MSYS2 mount NTFS with `noacl`, which discards the umask. Bash, fish,
-and zsh on Windows cannot set a mode, so the store keeps the permissions the
-parent directory grants. On Windows, the PowerShell module applies the
-single-account ACL when it creates the store items; set an existing ACL with
-`icacls`.
-
-### Append synchronization
-
-MSYS2 `flock` and a Windows named mutex do not coordinate, so these shells share
-no lock. Cygwin's `O_APPEND` compiles to a single `NtWriteFile` at
+The shells share no lock: MSYS2 `flock` and a Windows named mutex do not
+coordinate. Instead, each writer appends a whole record with one atomic append.
+Cygwin's `O_APPEND` compiles to a single `NtWriteFile` at
 `FILE_WRITE_TO_END_OF_FILE`, and .NET's `FILE_APPEND_DATA` reaches the same
-kernel atomic append. These append operations share a store without a common
-lock.
+kernel atomic append.
 
-Each writer appends a record with one write, and each record stays inside the
-atomic-append window. On NTFS under Cygwin and MSYS2, Skell tests a 1024-byte
-window. The fitter cuts longer records to fit. It counts characters instead of
-bytes to avoid a second pass in each writer. For non-ASCII input, it uses a
-250-character limit because UTF-8 code points use at most four bytes. Other
-platforms and filesystems are untested. Lower the cap in every writer if a
-filesystem has a smaller atomic-append window.
+The record cap keeps each append inside the atomic-append window. On NTFS under
+Cygwin and MSYS2, Skell tests a 1024-byte window. Other platforms and
+filesystems are untested; lower the cap in every writer if a filesystem has a
+smaller atomic-append window.
 
-Writers count characters differently: gawk and fish count code points; Bash and
-zsh count UTF-16 units under Cygwin's 16-bit `wchar_t`, as PowerShell does. Both
-counts stay within the 1024-byte window, but a command outside the Basic
-Multilingual Plane, such as one containing emoji or most historic scripts, is
-cut at a different point depending on which shell recorded it. Matching the
-counts would require a per-code-point scan on the Bash and zsh prompt paths,
-which recording cannot perform.
+The fitter counts characters instead of bytes to avoid a second pass in each
+writer. For non-ASCII input, it uses a 250-character limit because UTF-8 code
+points use at most four bytes. Writers count characters differently: gawk and
+fish count code points, while bash and zsh count UTF-16 units under Cygwin's
+16-bit `wchar_t`, as PowerShell does. Both counts stay within the 1024-byte
+window, but a command outside the Basic Multilingual Plane, such as one
+containing emoji, is cut at a different point depending on which shell recorded
+it. Matching the counts would require a per-code-point scan on the bash and zsh
+prompt paths, which recording cannot afford.
 
-PowerShell uses `FileSystemAclExtensions` for appending.
-`AppendAllText`, `Add-Content`, and `Out-File -Append` all open `GENERIC_WRITE`
-without `FILE_APPEND_DATA`. These methods emulate append as `GetLength()` plus
-a positional write and can race another shell mid-command. They also open
+PowerShell appends through `FileSystemAclExtensions`. `AppendAllText`,
+`Add-Content`, and `Out-File -Append` open `GENERIC_WRITE` without
+`FILE_APPEND_DATA`. They emulate append as `GetLength()` plus a positional
+write, which can race another shell mid-command. They also open
 `FileShare.Read`, so a second writer throws.
 
-### Directories are machine-local
+Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it,
+so before opening the store, fish rewrites a drive-letter path to its mounted
+MSYS2 path. Bash and zsh append using their configured paths.
 
-A record contains the directory but no machine identifier. When a path is read
-on another machine, it remains a plain string and may name a directory that does
-not exist or a different directory entirely. On Windows, every shell records the
-MSYS2 form (`/c/Users/...`); PowerShell folds its native path to match. A
-location outside the FileSystem provider, such as a registry path, records as
-`unknown`.
+## Development
 
-### Leading-space commands
+Each minimum version supplies features Skell uses:
 
-Skell's hook excludes commands whose typed form starts with a space. Shell
-history configuration cannot re-enable them.
+- bash 5.1: a `HISTCMD` that advances inside `PROMPT_COMMAND`, which the
+  recording hook compares to detect a new command. Bash 5.0 reports 1 there.
+  Bash 5.0 also supplies `EPOCHSECONDS`, `complete -I`, and a `READLINE_POINT`
+  counted in characters.
+- fish 4.0: `path mtime` and the `ctrl-r` key notation used by the binding.
+- PowerShell 7.4: the .NET filesystem APIs used to apply Unix modes.
 
-Each shell's own history filters remain active:
+The zsh integration uses parameter flags and hooks available before zsh 5.9.
+The `accept(edit)` and `accept(run)` skim binds are skim's current syntax; skim
+also accepts their deprecated spelling.
 
-- Bash preserves `HISTCONTROL` and `HISTIGNORE`; Skell adds `ignorespace` to
-  `HISTCONTROL` only when neither `ignorespace` nor `ignoreboth` is present.
-- Fish excludes leading-space commands by default.
-- PowerShell calls an existing `AddToHistoryHandler` before its own handler.
-- Zsh sets `HIST_IGNORE_SPACE` without changing its other history options.
-
-Shell filters reject commands before Skell sees them. A command accepted by a
-shell filter reaches the store unless its typed form starts with a space. Skell
-adds no other denylist.
-
-## Ranking
-
-Skell computes frecency in one read-time pass without stored state. The score
-sums an age-based weight for each occurrence: 4 within the hour, 2 within the
-day, 0.5 within the week, and 0.25 beyond. Ties go to the more recent command.
-
-Skell keeps duplicate records; each occurrence adds to the score.
-
-## Migrating from atuin
-
-```sh
-bash share/migrate-atuin.sh
-bash share/migrate-atuin.sh --append
-bash share/migrate-atuin.sh --dry-run
-bash share/migrate-atuin.sh --force
-```
-
-Before a normal import, close the shells that record to the store. The migration
-writes temporary files beside the target, validates the converted records, and
-publishes the staged file with one rename. A shell write that races the staging
-step can be lost. Without `--force`, a normal import prompts before starting.
-
-Validation checks field count, timestamp parsing, record length, and
-oldest-first order. UTC designators and numeric UTC offsets preserve the
-timestamp's absolute time. If conversion fails, the target remains byte for
-byte unchanged. Retrying does not duplicate a partial prefix. Existing target
-permissions are preserved.
-
-When `workspaces = true`, `atuin history list` limits output to the Git
-repository containing the current directory. The migration sets
-`ATUIN_FILTER_MODE=global` to include all repositories and passes
-`--reverse=true` for oldest-first output. Without global mode, a new repository
-can produce no records.
-
-## Tests
+Run the test suites from the repository root:
 
 ```sh
 bash tests/run-all.sh
@@ -386,9 +376,9 @@ bash tests/run-all.sh
 The suites need bash 5.1 or newer as the first `bash` on `PATH`; under an older
 bash, they exit with an error. Each suite creates its own store under a
 temporary directory and never reads the live store. Suites for unavailable
-shells are skipped and named in the summary.
-The mode assertions in `tests/permissions.sh` are skipped when the filesystem
-discards the umask, including NTFS mounts under Cygwin and MSYS2.
+shells are skipped and named in the summary. The mode assertions in
+`tests/permissions.sh` are skipped when the filesystem discards the umask,
+including NTFS mounts under Cygwin and MSYS2.
 
 No suite drives a real line editor. Test key bindings and completion-menu
 changes manually.
