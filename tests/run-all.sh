@@ -4,8 +4,8 @@
 
 set -uo pipefail
 
-if [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
-  printf 'run-all: bash %s is older than 5.0; put bash 5 first on PATH\n' "$BASH_VERSION" >&2
+if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+  printf 'run-all: bash %s is older than 5.1; put bash 5.1 or newer first on PATH\n' "$BASH_VERSION" >&2
   exit 1
 fi
 

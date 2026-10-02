@@ -6,8 +6,8 @@ case $- in
   *) return 0 ;;
 esac
 
-if [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
-  printf 'skell: bash %s is older than 5.0; skell is not loaded\n' "$BASH_VERSION" >&2
+if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+  printf 'skell: bash %s is older than 5.1; skell is not loaded\n' "$BASH_VERSION" >&2
   return 0
 fi
 

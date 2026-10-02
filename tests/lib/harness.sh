@@ -10,8 +10,8 @@
 
 set -uo pipefail
 
-if [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
-  printf '%s: bash %s is older than 5.0; put bash 5 first on PATH\n' \
+if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+  printf '%s: bash %s is older than 5.1; put bash 5.1 or newer first on PATH\n' \
     "$(basename -- "$0")" "$BASH_VERSION" >&2
   exit 1
 fi
