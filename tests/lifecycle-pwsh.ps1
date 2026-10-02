@@ -80,6 +80,31 @@ try {
     $resolved = Get-SkellGawkPath
     Assert-True 'an unset SKELL_GAWK resolves to a file or to nothing' `
       ($null -eq $resolved -or [System.IO.File]::Exists($resolved))
+
+    if ($IsWindows) {
+        $pathDir = Join-Path -Path $Sandbox -ChildPath 'path-gawk'
+        $null = New-Item -ItemType Directory -Force -Path $pathDir
+        $pathGawk = Join-Path -Path $pathDir -ChildPath 'gawk.exe'
+        Set-Content -LiteralPath $pathGawk -Value 'not an executable' -NoNewline
+        $priorPath = $env:PATH
+        try {
+            $env:PATH = "$pathDir;$priorPath"
+            $resolved = Get-SkellGawkPath
+            Assert-True 'Windows skips a gawk on PATH' ($resolved -ne $pathGawk)
+            # A registered MSYS2 elsewhere takes precedence over C:\msys64.
+            $elsewhere = @('HKCU:', 'HKLM:' | ForEach-Object {
+                    Get-ChildItem -Path "$_\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction Ignore
+                } | Where-Object {
+                    $_.GetValue('Publisher') -eq 'The MSYS2 Developers' -and
+                    ([string]$_.GetValue('InstallLocation')).TrimEnd('\') -ine 'C:\msys64'
+                })
+            if ([System.IO.File]::Exists('C:\msys64\usr\bin\gawk.exe') -and $elsewhere.Count -eq 0) {
+                Assert-True 'Windows prefers MSYS2 gawk' ($resolved -ieq 'C:\msys64\usr\bin\gawk.exe')
+            }
+        } finally {
+            $env:PATH = $priorPath
+        }
+    }
 } finally {
     $env:SKELL_GAWK = $priorOverride
 }

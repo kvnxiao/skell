@@ -12,10 +12,11 @@ Treat the store format and the shell hooks as one cross-shell interface. A
 format change updates every writer, decoder, preview script, migration script,
 and the README in the same change.
 
-Skell needs bash 5.0, fish 4.0, and PowerShell 7.4 on Windows, Linux, and
-macOS. Bash 5.0 supplies `EPOCHSECONDS`, `complete -I`, and a
-`READLINE_POINT` counted in characters; do not add version branches for older
-bash.
+Skell needs bash 5.1, fish 4.0, and PowerShell 7.4 on Windows, Linux, and
+macOS. Bash 5.1 keeps `HISTCMD` current inside `PROMPT_COMMAND`, which the
+recording hook compares to detect a new command; bash 5.0 reports 1 there.
+Bash 5.0 supplies `EPOCHSECONDS`, `complete -I`, and a `READLINE_POINT`
+counted in characters. Do not add version branches for older bash.
 
 ## Layout
 
@@ -159,7 +160,9 @@ lists, styles, prefixes, suffixes, and quoting rules.
 
 Use GNU awk features deliberately; the project requires `gawk`. Under a native
 Windows `gawk`, `PROCINFO["platform"]` is `"mingw"` and pipes run through
-`cmd.exe`.
+`cmd.exe`, which expands `%NAME%` and passes arguments in the ANSI code page.
+PowerShell therefore resolves MSYS2's or Git for Windows' `gawk` and uses a
+native build only when `SKELL_GAWK` names one.
 
 ## Comments
 
@@ -168,7 +171,7 @@ behavior, ordering requirements, and wrong-looking compatibility choices.
 
 ## Verification
 
-Run the applicable commands from the repository root with bash 5.0 or newer
+Run the applicable commands from the repository root with bash 5.1 or newer
 first on `PATH`; on macOS, install Homebrew's bash. The command patterns select
 files by directory and extension, so a new file under a covered directory
 needs no edit here:

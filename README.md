@@ -14,22 +14,24 @@ Skell supports bash, fish, PowerShell, and zsh on Windows, Linux, and macOS:
 
 | shell      | needs | tested against |
 | ---------- | ----- | -------------- |
-| bash       | 5.0   | 5.3            |
+| bash       | 5.1   | 5.3            |
 | fish       | 4.0   | 4.8            |
 | PowerShell | 7.4   | 7.6            |
 | zsh        |       | 5.9            |
 
 Each minimum version supplies features skell uses:
 
-- bash 5.0: `EPOCHSECONDS`, `complete -I`, and a `READLINE_POINT` counted in
-  characters.
+- bash 5.1: a `HISTCMD` that advances inside `PROMPT_COMMAND`, which the
+  recording hook compares to detect a new command. Bash 5.0 reports 1 there.
+  Bash 5.0 also supplies `EPOCHSECONDS`, `complete -I`, and a `READLINE_POINT`
+  counted in characters.
 - fish 4.0: `path mtime` and the `ctrl-r` key notation used by the binding.
 - PowerShell 7.4: the .NET filesystem APIs used to apply Unix modes.
 
 The zsh integration uses parameter flags and hooks available before zsh 5.9.
 
 macOS ships bash 3.2 as `/bin/bash`; install bash 5 with `brew install bash`.
-Under a bash older than 5.0, `bash/skell.bash` prints a warning and loads
+Under a bash older than 5.1, `bash/skell.bash` prints a warning and loads
 nothing.
 
 - [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6. The
@@ -38,12 +40,13 @@ nothing.
 - `gawk` for ranking and previews (`mktime`, `systime`, and `PROCINFO` are GNU
   extensions). Windows has no built-in awk, and neither MSYS2 nor Git for
   Windows puts its `usr\bin` on the native `PATH`. On Windows, the PowerShell
-  module searches for `gawk.exe` on `PATH`, in the `usr\bin` directory of the
-  Git for Windows installation found through `git`, and in
-  `C:\msys64\usr\bin`. Scoop can install a native build with
-  `scoop install gawk`.
-  Set `SKELL_GAWK` to override these lookups; the other shells resolve `gawk`
-  only through `PATH`.
+  module uses MSYS2's `usr\bin\gawk.exe`, then Git for Windows'. It finds
+  MSYS2 through the installer's uninstall entry, falling back to `C:\msys64`,
+  and Git through the installer's registry key, falling back to `git` on
+  `PATH`. It ignores `gawk` on `PATH`: a native Windows build, such as
+  Scoop's, runs previews through `cmd.exe`, which expands a defined `%NAME%`
+  and cannot pass characters outside the ANSI code page. Set `SKELL_GAWK` to
+  override these lookups; the other shells resolve `gawk` only through `PATH`.
 - [eza](https://github.com/eza-community/eza) or
   [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
   preview; by default, the preview uses `ls` without either
@@ -174,8 +177,10 @@ environment, so export it: `export SKELL_COMPLETE_LS=lsd` in bash and zsh,
 `set -gx SKELL_COMPLETE_LS lsd` in fish, or `$env:SKELL_COMPLETE_LS = 'lsd'`
 in PowerShell.
 
-A native Windows `gawk`, such as Scoop's, runs the lister through `cmd.exe`.
-There the unset default tries `eza`, then `lsd`, then `dir /b`.
+When `SKELL_GAWK` names a native Windows `gawk`, such as Scoop's, the lister
+runs through `cmd.exe`. There the unset default tries `eza`, then `lsd`, then
+`dir /b`. A directory does not list when its path has characters outside the
+ANSI code page or the name of a defined variable between `%` signs.
 
 ### zsh
 
@@ -378,7 +383,7 @@ can produce no records.
 bash tests/run-all.sh
 ```
 
-The suites need bash 5.0 or newer as the first `bash` on `PATH`; under an older
+The suites need bash 5.1 or newer as the first `bash` on `PATH`; under an older
 bash, they exit with an error. Each suite creates its own store under a
 temporary directory and never reads the live store. Suites for unavailable
 shells are skipped and named in the summary.

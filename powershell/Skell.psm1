@@ -283,28 +283,63 @@ if (-not $script:SkellHooked) {
     }.GetNewClosure()
 }
 
-# Windows PowerShell uses the native PATH, which excludes MSYS2's and Git for
-# Windows' usr\bin. If SKELL_GAWK is set, use only that path; otherwise check
-# PATH, git's usr\bin, and C:\msys64\usr\bin in that order.
+# The MSYS2 installer records its directory under an uninstall key named by a
+# GUID. Scoop, Chocolatey, and archive installs record none.
+function Get-SkellMsysRoot {
+    foreach ($hive in [Microsoft.Win32.Registry]::CurrentUser, [Microsoft.Win32.Registry]::LocalMachine) {
+        $uninstall = $hive.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Uninstall')
+        if (-not $uninstall) { continue }
+        try {
+            foreach ($name in $uninstall.GetSubKeyNames()) {
+                # A subkey that denies read throws instead of returning null.
+                try { $key = $uninstall.OpenSubKey($name) } catch { continue }
+                if (-not $key) { continue }
+                try {
+                    if ([string]$key.GetValue('Publisher') -eq 'The MSYS2 Developers') {
+                        $location = [string]$key.GetValue('InstallLocation')
+                        if ($location) { return $location }
+                    }
+                } finally { $key.Dispose() }
+            }
+        } finally { $uninstall.Dispose() }
+    }
+    return 'C:\msys64'
+}
+
+# A git on PATH may be a shim outside the installation, so read the installer's
+# key first.
+function Get-SkellGitRoot {
+    foreach ($hive in [Microsoft.Win32.Registry]::LocalMachine, [Microsoft.Win32.Registry]::CurrentUser) {
+        $key = $hive.OpenSubKey('Software\GitForWindows')
+        if (-not $key) { continue }
+        try {
+            $location = [string]$key.GetValue('InstallPath')
+            if ($location) { return $location }
+        } finally { $key.Dispose() }
+    }
+    $git = @(Get-Command git -CommandType Application -ErrorAction Ignore)[0]
+    if ($git) { return Split-Path -Parent (Split-Path -Parent $git.Source) }
+    return $null
+}
+
+# If SKELL_GAWK is set, use only that path. On Windows, use MSYS2's gawk, then
+# Git for Windows', and skip PATH: a native Windows gawk runs pipes through
+# cmd.exe, which expands %NAME% and passes paths in the ANSI code page.
 function Get-SkellGawkPath {
     if ($env:SKELL_GAWK) {
         if ([System.IO.File]::Exists($env:SKELL_GAWK)) { return $env:SKELL_GAWK }
         return $null
     }
-    # Select the first PATH match because the caller invokes the returned path
-    # directly.
-    $onPath = @(Get-Command gawk -CommandType Application -ErrorAction Ignore)[0]
-    if ($onPath) { return $onPath.Source }
-    if (-not $IsWindows) { return $null }
-
-    $candidates = @()
-    $git = @(Get-Command git -CommandType Application -ErrorAction Ignore)[0]
-    if ($git) {
-        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
-        $candidates += Join-Path -Path $gitRoot -ChildPath 'usr' -AdditionalChildPath 'bin', 'gawk.exe'
+    if (-not $IsWindows) {
+        # Select the first PATH match because the caller invokes the returned
+        # path directly.
+        $onPath = @(Get-Command gawk -CommandType Application -ErrorAction Ignore)[0]
+        if ($onPath) { return $onPath.Source }
+        return $null
     }
-    $candidates += 'C:\msys64\usr\bin\gawk.exe'
-    foreach ($candidate in $candidates) {
+    foreach ($root in @(Get-SkellMsysRoot) + @(Get-SkellGitRoot)) {
+        if (-not $root) { continue }
+        $candidate = Join-Path -Path $root -ChildPath 'usr' -AdditionalChildPath 'bin', 'gawk.exe'
         if ([System.IO.File]::Exists($candidate)) { return $candidate }
     }
     return $null
@@ -341,13 +376,15 @@ function Test-SkellReady {
         $script:SkellGawk = Get-SkellGawkPath
         $script:SkellSk = @(Get-Command sk -CommandType Application -ErrorAction Ignore)[0]
         $missing = @()
-        if (-not $script:SkellSk) { $missing += 'sk' }
-        if (-not $script:SkellGawk) { $missing += 'gawk (or SKELL_GAWK)' }
+        if (-not $script:SkellSk) { $missing += 'sk on PATH' }
+        if (-not $script:SkellGawk) {
+            $missing += if ($IsWindows) { 'gawk from MSYS2 or Git for Windows (or SKELL_GAWK)' } else { 'gawk on PATH (or SKELL_GAWK)' }
+        }
         $script:SkellReady = $missing.Count -eq 0
         # Key handlers call this check; print below the input and redraw it.
         if (-not $script:SkellReady) {
             [Console]::Out.WriteLine()
-            Write-Warning "skell: requires $($missing -join ' and ') on PATH; Ctrl+R and Tab use PSReadLine defaults"
+            Write-Warning "skell: requires $($missing -join ' and '); Ctrl+R and Tab use PSReadLine defaults"
             [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
         }
     }
