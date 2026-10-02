@@ -335,9 +335,9 @@ smaller atomic-append window.
 
 The fitter counts characters instead of bytes to avoid a second pass in each
 writer. For non-ASCII input, it uses a 250-character limit because UTF-8 code
-points use at most four bytes. Writers count characters differently: gawk and
-fish count code points, while bash and zsh count UTF-16 units under Cygwin's
-16-bit `wchar_t`, as PowerShell does. Both counts stay within the 1024-byte
+points use at most four bytes. Writers count characters differently: fish
+counts code points, while bash and zsh count UTF-16 units under Cygwin's 16-bit
+`wchar_t`, as PowerShell does. Both counts stay within the 1024-byte
 window, but a command outside the Basic Multilingual Plane, such as one
 containing emoji, is cut at a different point depending on which shell recorded
 it. Matching the counts would add a per-code-point scan to the bash and zsh

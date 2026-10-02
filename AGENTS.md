@@ -191,7 +191,8 @@ bash tests/run-all.sh
 `tests/lifecycle-pwsh.ps1` through it; the script needs the module path and
 sandbox that `run-all.sh` passes. The suites cover:
 
-- the codec in all five implementations and the record fitter's boundaries;
+- the encoder and record fitter in the four writers (bash, fish, PowerShell,
+  and zsh) and the decoder in those four plus `share/codec.awk`;
 - each recording hook's output and store permissions;
 - the fish completion menu's prefix, insertion, buffer, and control-rendering
   helpers;
