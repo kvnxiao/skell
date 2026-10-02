@@ -342,7 +342,7 @@ _skell_tab_finish() {
   local w
   # The x prefix keeps a match of `@` or `*` from subscripting the whole map.
   for w in "${_skell_cap_words[@]}"; do
-    [ -n "$w" ] && [ -z "${seen[x$w]+x}" ] || continue
+    if [ -z "$w" ] || [ -n "${seen[x$w]+x}" ]; then continue; fi
     seen[x$w]=1
     words+=("$w")
   done
