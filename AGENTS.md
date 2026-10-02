@@ -9,8 +9,8 @@ search and the completion menus may run `sk`, `gawk`, `eza`, `lsd`, `ls`, or
 `dir`.
 
 Treat the store format and the shell hooks as one cross-shell interface. A
-format change updates every writer, decoder, preview script, migration script,
-and the README in the same change.
+format change updates every writer, decoder, preview script, and the README in
+the same change.
 
 Skell needs bash 5.1, fish 4.0, and PowerShell 7.4 on Windows, Linux, and
 macOS. Bash 5.1 keeps `HISTCMD` current inside `PROMPT_COMMAND`, which the
@@ -47,7 +47,6 @@ The shared scripts live in `share/`:
 
 - `rank.awk` ranks distinct commands by frecency.
 - `preview-*.awk` render skim previews.
-- `migrate-atuin.sh` and `migrate-atuin.awk` import atuin history.
 - `build-fish-plugin.sh` assembles the `fish-releases` branch.
 
 ## Store contract
@@ -192,7 +191,8 @@ bash tests/run-all.sh
 `tests/lifecycle-pwsh.ps1` through it; the script needs the module path and
 sandbox that `run-all.sh` passes. The suites cover:
 
-- the codec in all five implementations and the record fitter's boundaries;
+- the encoder and record fitter in the four writers (bash, fish, PowerShell,
+  and zsh) and the decoder in those four plus `share/codec.awk`;
 - each recording hook's output and store permissions;
 - the fish completion menu's prefix, insertion, buffer, and control-rendering
   helpers;
@@ -201,8 +201,7 @@ sandbox that `run-all.sh` passes. The suites cover:
   module's lifecycle;
 - the completion preview's choice of directory lister;
 - the files fish loads from the built plugin and fish's rewrite of an
-  inherited Windows store path (skipped without MSYS2);
-- the atuin importer's failure paths.
+  inherited Windows store path (skipped without MSYS2).
 
 No suite drives a real line editor, because the test environment cannot
 provide a pty on every supported platform. Bash records under `bash -i`; zsh
