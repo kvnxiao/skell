@@ -12,10 +12,6 @@ rank-*-*.tsv
 complete-*-*.tsv
 scratch-*-*.hist
 
-# migrate-atuin.sh stages a conversion beside its target. A killed run may
-# leave the staged file behind.
-history.tsv.*
-
 # macOS and Windows write these into any directory a file manager opens.
 .DS_Store
 Thumbs.db

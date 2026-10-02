@@ -1,14 +1,15 @@
 # skell
 
-Skell is skim for your shell: it puts [skim](https://github.com/skim-rs/skim),
-a fuzzy finder, behind the two keys you press most when working in a terminal.
-`Ctrl+R` searches every command you have run, and `Tab` lists the shell's own
-completions in a filterable menu. Skell works the same way in bash, fish,
-PowerShell, and zsh on Windows, Linux, and macOS, and it keeps out of the way
-of the prompt: recording a command starts no process.
+[skim](https://github.com/skim-rs/skim) for your shell.
+
+Skell binds `Ctrl+R` and `Tab` to skim, a fuzzy finder. `Ctrl+R` searches every
+command you have run, and `Tab` lists the shell's own completions in a
+filterable menu. Skell works the same way in bash, fish, PowerShell, and zsh on
+Windows, Linux, and macOS. Recording a command starts no process, so Skell does
+not delay the prompt.
 
 - **Shared history.** Every shell appends to one history file, so a command run
-  in zsh is one `Ctrl+R` away in PowerShell. Each record keeps the time, the
+  in zsh is one `Ctrl+R` away in PowerShell. Each record stores the time, the
   working directory, the exit status, and the shell that ran it.
 - **History search.** `Ctrl+R` opens skim over your history, ranked by how
   often and how recently you ran each command. A preview pane shows the details
@@ -33,15 +34,15 @@ nothing.
 Skell also needs these programs:
 
 - [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6.
-- `gawk` for ranking and previews. Other awk implementations lack the GNU
-  extensions Skell uses (`mktime`, `systime`, and `PROCINFO`).
+- `gawk` for ranking and previews. Skell uses the GNU extensions `mktime`,
+  `systime`, and `PROCINFO`.
 - Optionally, [eza](https://github.com/eza-community/eza) or
   [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
   preview. Without either, the preview uses `ls`.
 
 On Windows, bash, fish, and zsh find `gawk` on `PATH`. Windows has no built-in
 awk, and neither MSYS2 nor Git for Windows puts its `usr\bin` on the native
-`PATH`, so the PowerShell module looks for `gawk` itself:
+`PATH`. The PowerShell module therefore looks for `gawk` in this order:
 
 1. MSYS2's `usr\bin\gawk.exe`, found through the installer's uninstall entry
    or at `C:\msys64`.
@@ -97,7 +98,7 @@ Starship moves `PROMPT_COMMAND` into `STARSHIP_PROMPT_COMMAND` and runs it with
 Import-Module "$HOME\github\skell\powershell\Skell.psm1"
 ```
 
-The prompt wrapper defined last runs first, while `$?` still records your
+Skell's prompt wrapper, defined last, runs first, while `$?` still has your
 command's exit status. When `Ctrl+R`, `Tab`, or `Shift+Tab` already has a
 custom handler, Skell keeps it and does not install its own binding.
 `Remove-Module Skell` restores the prompt, the PSReadLine history handler, and
@@ -116,10 +117,10 @@ and `Tab` fall back to the shell's own history search and completion.
 | `Alt+Enter` | put the command on the line and run |
 | `Esc`       | leave the line untouched            |
 
-Skell ranks distinct commands by frecency. Each time you ran a command adds to
-its score by age: 4 within the hour, 2 within the day, 0.5 within the week, and
-0.25 beyond. Ties go to the more recent command. The ranking runs when you open
-the search and keeps no state of its own.
+Skell ranks distinct commands by frecency. Each run of a command adds a weight
+to its score based on the run's age: 4 within the hour, 2 within the day, 0.5
+within the week, and 0.25 beyond. Ties go to the more recent command. Skell
+computes the ranking each time you open the search and stores no ranking state.
 
 In history and completion text, skim shows control characters (C0 and C1
 controls and DEL) as `<0xNN>`. The command placed on the line keeps the original
@@ -142,9 +143,12 @@ terminal does not answer that report, the command stays on the line for
 
 Before opening the menu, Skell inserts any unambiguous prefix. Completing `sub`
 against `subdir-one` and `subdir-two` inserts `subdir-`, and the next `Tab`
-opens the menu. A single match is inserted without the menu. Selecting several
-matches inserts them separated by spaces; PowerShell sometimes joins them with
-commas instead, as its section below describes.
+opens the menu. A single match is inserted without the menu.
+
+Selecting several matches inserts them separated by spaces. In PowerShell,
+multiple values for a PowerShell command join with commas into one array, as in
+`Get-ChildItem ./a,./b`. Parameter names, command names, and arguments to
+native executables still join with spaces.
 
 Outside the menu, `Shift+Tab` runs the shell's native completion:
 
@@ -153,7 +157,8 @@ Outside the menu, `Shift+Tab` runs the shell's native completion:
 - PowerShell: PSReadLine's `MenuComplete`.
 - zsh: zsh's completion widget.
 
-In bash and zsh, Skell binds `Shift+Tab` only when it has no binding.
+In bash and zsh, Skell binds `Shift+Tab` only when `Shift+Tab` has no existing
+binding.
 
 ### Preview
 
@@ -167,9 +172,9 @@ In bash and zsh, Skell binds `Shift+Tab` only when it has no binding.
 
 Bash has no match descriptions, so `description` behaves as `directory` there.
 
-On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`, and a
-directory also starts the directory lister. Set `SKELL_COMPLETE_PREVIEW=off` to
-skip them.
+On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`. For a
+directory, it also starts the directory lister through `sh`. Set
+`SKELL_COMPLETE_PREVIEW=off` to skip them.
 
 `SKELL_COMPLETE_LS` selects the directory lister:
 
@@ -189,8 +194,8 @@ listing. The preview reads the variable from the environment, so export it:
 - PowerShell: `$env:SKELL_COMPLETE_LS = 'lsd'`
 
 When `SKELL_GAWK` names a native Windows `gawk`, the lister runs through
-`cmd.exe`, and the unset default tries `eza`, then `lsd`, then `dir /b`. There
-a directory does not list when its path has characters outside the ANSI code
+`cmd.exe` instead of `sh`, and the unset default tries `eza`, then `lsd`, then
+`dir /b`. In that setup, a directory does not list when its path has characters outside the ANSI code
 page or the name of a defined variable between `%` signs.
 
 ### Turning the menu off
@@ -236,12 +241,8 @@ candidates, not descriptions.
 
 `TabExpansion2` supplies the matches in-process, so argument completers and
 `TabExpansion2` overrides still apply. Tooltips appear as descriptions, except
-for files, directories, and executables, whose tooltips repeat their path.
-
-- A single directory match gets a trailing separator, as in PSReadLine.
-- Multiple values for a PowerShell command join with commas into one array, as
-  in `Get-ChildItem ./a,./b`. Parameter names, command names, and arguments to
-  native executables join with spaces.
+for files, directories, and executables, whose tooltips repeat their path. A
+single directory match gets a trailing separator, as in PSReadLine.
 
 ### zsh
 
@@ -261,7 +262,7 @@ as `Completing %d` fills the column; bare `%d` leaves it empty.
 Skell stores history in `$XDG_DATA_HOME/skell/history.tsv` or, when
 `XDG_DATA_HOME` is unset or empty, in `~/.local/share/skell/history.tsv`. Set
 `SKELL_DATA_DIR` to move the `skell` directory, which also has each session's
-scratch files, or `SKELL_HISTORY` to move only the history file. On Windows,
+scratch files. Set `SKELL_HISTORY` to move only the history file. On Windows,
 bash, fish, and zsh use MSYS2 paths; PowerShell uses a native Windows path.
 
 ### What gets recorded
@@ -339,8 +340,8 @@ fish count code points, while bash and zsh count UTF-16 units under Cygwin's
 16-bit `wchar_t`, as PowerShell does. Both counts stay within the 1024-byte
 window, but a command outside the Basic Multilingual Plane, such as one
 containing emoji, is cut at a different point depending on which shell recorded
-it. Matching the counts would require a per-code-point scan on the bash and zsh
-prompt paths, which recording cannot afford.
+it. Matching the counts would add a per-code-point scan to the bash and zsh
+prompt paths, so Skell leaves the counts unmatched.
 
 PowerShell appends through `FileSystemAclExtensions`. `AppendAllText`,
 `Add-Content`, and `Out-File -Append` open `GENERIC_WRITE` without

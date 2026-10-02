@@ -1,4 +1,4 @@
-# Store codec for previews and atuin imports.
+# Store codec for the awk scripts.
 # Load it ahead of the script that calls it: gawk -f codec.awk -f caller.awk
 #
 # skell_unescape decodes doubled backslashes before other escapes. A placeholder

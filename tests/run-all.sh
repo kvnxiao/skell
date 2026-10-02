@@ -53,7 +53,6 @@ need gawk 'record'      && run record      bash "$here/record.sh"
 run initialize bash "$here/initialize.sh"
 run complete-bash bash "$here/complete-bash.sh"
 need gawk 'render'      && run render      bash "$here/render.sh"
-need gawk 'migrate'     && run migrate     bash "$here/migrate.sh"
 need gawk 'permissions' && run permissions bash "$here/permissions.sh"
 
 if need pwsh 'codec-pwsh'; then
