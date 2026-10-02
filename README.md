@@ -1,8 +1,8 @@
 # skell
 
 Skell gives bash, fish, PowerShell, and zsh one shared command history. It uses
-[skim](https://github.com/skim-rs/skim) for search and replaces the fish and
-zsh tab-completion menus.
+[skim](https://github.com/skim-rs/skim) for search and replaces each shell's
+tab-completion menu.
 
 Each shell appends to the same file without starting a process while recording.
 History search starts skim once and runs the preview helper for the candidate
@@ -14,15 +14,25 @@ Skell supports bash, fish, PowerShell, and zsh on Windows, Linux, and macOS:
 
 | shell      | needs | tested against |
 | ---------- | ----- | -------------- |
-| bash       | 5.0   | 5.3            |
+| bash       | 5.1   | 5.3            |
 | fish       | 4.0   | 4.8            |
 | PowerShell | 7.4   | 7.6            |
 | zsh        |       | 5.9            |
 
-Bash 5.0 supplies `EPOCHSECONDS`, fish 4.0 supplies `path mtime` and the
-`ctrl-r` key notation used by the binding, and PowerShell 7.4 supplies the .NET
-filesystem APIs used to apply Unix modes. The zsh integration uses parameter
-flags and hooks available before zsh 5.9.
+Each minimum version supplies features skell uses:
+
+- bash 5.1: a `HISTCMD` that advances inside `PROMPT_COMMAND`, which the
+  recording hook compares to detect a new command. Bash 5.0 reports 1 there.
+  Bash 5.0 also supplies `EPOCHSECONDS`, `complete -I`, and a `READLINE_POINT`
+  counted in characters.
+- fish 4.0: `path mtime` and the `ctrl-r` key notation used by the binding.
+- PowerShell 7.4: the .NET filesystem APIs used to apply Unix modes.
+
+The zsh integration uses parameter flags and hooks available before zsh 5.9.
+
+macOS ships bash 3.2 as `/bin/bash`; install bash 5 with `brew install bash`.
+Under a bash older than 5.1, `bash/skell.bash` prints a warning and loads
+nothing.
 
 - [skim](https://github.com/skim-rs/skim) for `sk`, tested against 5.6.6. The
   `accept(edit)` and `accept(run)` binds are skim's current syntax; skim also
@@ -30,12 +40,13 @@ flags and hooks available before zsh 5.9.
 - `gawk` for ranking and previews (`mktime`, `systime`, and `PROCINFO` are GNU
   extensions). Windows has no built-in awk, and neither MSYS2 nor Git for
   Windows puts its `usr\bin` on the native `PATH`. On Windows, the PowerShell
-  module searches for `gawk.exe` on `PATH`, in the `usr\bin` directory of the
-  Git for Windows installation found through `git`, and in
-  `C:\msys64\usr\bin`. Scoop can install a native build with
-  `scoop install gawk`.
-  Set `SKELL_GAWK` to override these lookups; the other shells resolve `gawk`
-  only through `PATH`.
+  module uses MSYS2's `usr\bin\gawk.exe`, then Git for Windows'. It finds
+  MSYS2 through the installer's uninstall entry, falling back to `C:\msys64`,
+  and Git through the installer's registry key, falling back to `git` on
+  `PATH`. It ignores `gawk` on `PATH`: a native Windows build, such as
+  Scoop's, runs previews through `cmd.exe`, which expands a defined `%NAME%`
+  and cannot pass characters outside the ANSI code page. Set `SKELL_GAWK` to
+  override these lookups; the other shells resolve `gawk` only through `PATH`.
 - [eza](https://github.com/eza-community/eza) or
   [lsd](https://github.com/lsd-rs/lsd) for the completion menu's directory
   preview; by default, the preview uses `ls` without either
@@ -82,13 +93,13 @@ Import-Module "$HOME\github\skell\powershell\Skell.psm1"
 ```
 
 `Remove-Module Skell` restores the prompt, PSReadLine history handler, and prior
-`Ctrl+R` binding. When `Ctrl+R` already has a custom handler, Skell preserves it
-and does not install its history-search binding. Removing Skell does not replace
-a custom handler installed after Skell.
+`Ctrl+R`, `Tab`, and `Shift+Tab` bindings. When one of those chords already has
+a custom handler, Skell preserves it and does not install its own binding.
+Removing Skell does not replace a custom handler installed after Skell.
 
-History search requires `sk` and `gawk`. If either is missing, the search leaves
-the command line unchanged; PowerShell also writes a warning. Fish warns once
-per session and falls back to its own history pager and completion.
+History search and the completion menu require `sk` and `gawk`. If either is
+missing, each shell warns once per session, and `Ctrl+R` and `Tab` fall back to
+the shell's own history search and completion.
 
 ## History search
 
@@ -105,8 +116,8 @@ terminal does not answer DSR, the command remains on the line for `Enter`.
 
 ## Completion menu
 
-The completion menu applies to fish and zsh. Skell binds `Tab` and sends the
-shell's matches through skim.
+Skell binds `Tab` in every shell and sends the shell's own completion matches
+through skim.
 
 | key          | action                         |
 | ------------ | ------------------------------ |
@@ -120,7 +131,56 @@ Before opening the menu, Skell inserts an unambiguous prefix. Completing `sub`
 against `subdir-one` and `subdir-two` inserts `subdir-`; the next `Tab` opens the
 menu. A single match is inserted without the menu.
 
-Selecting multiple matches inserts them with spaces between them.
+Selecting multiple matches inserts them with spaces between them, except in
+PowerShell as described below.
+
+Outside the menu, `Shift+Tab` runs the shell's native completion: fish's pager,
+zsh's completion widget, readline's `complete` in bash, and PSReadLine's
+`MenuComplete` in PowerShell. In zsh and bash, Skell binds `Shift+Tab` only
+when it has no binding.
+
+### Settings
+
+`SKELL_COMPLETE=off` leaves `Tab` to the shell and keeps history search. Bash
+reads it when `bash/skell.bash` loads; fish, PowerShell, and zsh read it on each
+`Tab`.
+
+`SKELL_COMPLETE_PREVIEW` selects the preview:
+
+| value                   | preview                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `description` (default) | directory listings and descriptions                            |
+| `directory`             | directory listings, shown only when a candidate is a directory |
+| `off`                   | none                                                           |
+
+Bash has no match descriptions, so `description` behaves as `directory` there.
+
+On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`. For a
+directory it also starts the directory lister through `sh`, or through
+`cmd.exe` under a native Windows `gawk`. Set `off` to skip them.
+
+### Directory preview
+
+The preview lists a directory with the command that `SKELL_COMPLETE_LS` selects:
+
+| value          | lister                                        |
+| -------------- | --------------------------------------------- |
+| unset or empty | the first of `eza`, `lsd`, and `ls` on `PATH` |
+| `eza`          | `eza`                                         |
+| `lsd`          | `lsd`                                         |
+| `ls`           | `ls`                                          |
+
+A lister named by `SKELL_COMPLETE_LS` has no fallback: when it is not on
+`PATH`, the preview shows the shell's error. Any other value makes the preview
+print an error instead of a listing. The preview reads the variable from the
+environment, so export it: `export SKELL_COMPLETE_LS=lsd` in bash and zsh,
+`set -gx SKELL_COMPLETE_LS lsd` in fish, or `$env:SKELL_COMPLETE_LS = 'lsd'`
+in PowerShell.
+
+When `SKELL_GAWK` names a native Windows `gawk`, such as Scoop's, the lister
+runs through `cmd.exe`. There the unset default tries `eza`, then `lsd`, then
+`dir /b`. A directory does not list when its path has characters outside the
+ANSI code page or the name of a defined variable between `%` signs.
 
 ### zsh
 
@@ -134,11 +194,6 @@ elided. Skell omits the column when one group supplies all matches. Queries
 filter matches, not group descriptions: `co` does not select every entry in a
 group named `commands`. The `format` style supplies the group text. A value such
 as `Completing %d` fills the column; bare `%d` leaves it empty.
-
-For a candidate that names a directory, the preview lists it as described in
-[Directory preview](#directory-preview). For other candidates, the preview
-prints the description. Skell shows the preview window only when the candidate
-set contains a directory.
 
 ### fish
 
@@ -154,33 +209,35 @@ candidates, not descriptions.
   `.`, `,`, or `-`, matching fish. A space also closes a quote the match left
   open.
 
-`SKELL_COMPLETE_PREVIEW` selects the preview:
+### bash
 
-| value                   | preview                                                        |
-| ----------------------- | -------------------------------------------------------------- |
-| `description` (default) | directory listings and descriptions                            |
-| `directory`             | directory listings, shown only when a candidate is a directory |
-| `off`                   | none                                                           |
+Readline does not expose its matches to a key binding, so `Tab` runs a macro
+that calls readline's own `complete`. Skell wraps each compspec, including
+bash-completion's lazily loaded ones, to record the matches. Readline still
+splits the words and runs the completion functions, so the menu offers native
+`Tab`'s matches.
 
-On Windows, each cursor move in the menu starts `cmd.exe` and `gawk`, plus `sh`
-and the directory lister for a directory; set `off` to skip them.
+- Skell quotes filename matches as readline does: inside an open quote, or with
+  backslashes.
+- A directory match gets a trailing `/`; other finished matches get a space
+  unless the compspec sets `nospace`.
+- When no `-D`, `-E`, or `-I` compspec exists, Skell adds one to receive
+  default, empty-line, and command-name completion. Each falls back to bash's
+  own completion when the menu is not running.
+- Readline lists matches on a second `Tab` only after its own `complete`. When
+  the menu records nothing, as at a continuation prompt, a second `Tab` does
+  not list them; Shift+Tab twice does.
 
-### Directory preview
+### PowerShell
 
-The preview lists a directory with the command that `SKELL_COMPLETE_LS` selects:
+`TabExpansion2` supplies the matches in-process, so argument completers and
+`TabExpansion2` overrides still apply. Tooltips appear as descriptions, except
+for files, directories, and executables, whose tooltips repeat their path.
 
-| value          | lister                                        |
-| -------------- | --------------------------------------------- |
-| unset or empty | the first of `eza`, `lsd`, and `ls` on `PATH` |
-| `eza`          | `eza`                                         |
-| `lsd`          | `lsd`                                         |
-| `ls`           | `ls`                                          |
-
-A lister named by `SKELL_COMPLETE_LS` has no fallback: when it is not on `PATH`, the preview shows
-the shell's error. Any other value makes the preview print an error instead of a
-listing. The preview reads the variable from the environment, so export it:
-`export SKELL_COMPLETE_LS=lsd` in zsh, or `set -gx SKELL_COMPLETE_LS lsd` in
-fish.
+- A single directory match gets a trailing separator, as in PSReadLine.
+- Multiple values for a PowerShell command join with commas into one array, as
+  in `Get-ChildItem ./a,./b`. Parameter names, command names, and arguments to
+  native executables join with spaces.
 
 ## Store
 
@@ -326,8 +383,10 @@ can produce no records.
 bash tests/run-all.sh
 ```
 
-Each suite creates its own store under a temporary directory and never reads the
-live store. Suites for unavailable shells are skipped and named in the summary.
+The suites need bash 5.1 or newer as the first `bash` on `PATH`; under an older
+bash, they exit with an error. Each suite creates its own store under a
+temporary directory and never reads the live store. Suites for unavailable
+shells are skipped and named in the summary.
 The mode assertions in `tests/permissions.sh` are skipped when the filesystem
 discards the umask, including NTFS mounts under Cygwin and MSYS2.
 

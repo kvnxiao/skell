@@ -14,7 +14,7 @@ completion_preview=$SKELL_SANDBOX/render-completion-preview
 
 escape=$'\033'
 bell=$'\a'
-# U+009D as UTF-8 bytes; bash 3.2 has no \u escape.
+# U+009D as UTF-8 bytes; $'\u' expands only in a UTF-8 locale.
 c1_osc=$'\302\235'
 command="printf x${escape}]0;command${bell}${c1_osc}c1"
 directory="/d${escape}]0;directory${bell}"

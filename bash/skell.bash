@@ -6,6 +6,11 @@ case $- in
   *) return 0 ;;
 esac
 
+if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+  printf 'skell: bash %s is older than 5.1; skell is not loaded\n' "$BASH_VERSION" >&2
+  return 0
+fi
+
 if [ -z "${SKELL_ROOT:-}" ]; then
   SKELL_ROOT=${BASH_SOURCE[0]%/*}
   SKELL_ROOT=${SKELL_ROOT%/*}
@@ -32,8 +37,78 @@ esac
 _skell_scratch="$SKELL_DATA_DIR/scratch-bash-$$.hist"
 _skell_rank="$SKELL_DATA_DIR/rank-bash-$$.tsv"
 _skell_rank_raw="$SKELL_DATA_DIR/rank-bash-$$.raw.tsv"
-(umask 077; : > "$_skell_scratch")
+(umask 077; : >| "$_skell_scratch")
 _skell_histnum=
+
+# Truncate scratch files instead of spawning rm; the exit hook deletes them. A
+# truncated file keeps its mode, so only the first creation needs a subshell
+# for the private umask.
+_skell_empty() {
+  local file
+  for file; do
+    if [ -e "$file" ]; then
+      : >| "$file"
+    else
+      (umask 077; : >| "$file")
+    fi
+  done
+}
+
+# Check once per session that sk and gawk are on PATH.
+_skell_ready() {
+  if [ -z "${_skell_ready_state-}" ]; then
+    _skell_ready_state=1
+    local missing='' tool
+    for tool in sk gawk; do
+      type -P "$tool" >/dev/null || missing+=${missing:+ and }$tool
+    done
+    if [ -n "$missing" ]; then
+      _skell_ready_state=0
+      printf 'skell: requires %s on PATH; Ctrl+R and Tab use bash defaults\n' "$missing" >&2
+    fi
+  fi
+  [ "$_skell_ready_state" = 1 ]
+}
+
+# Spawning rm costs ~25ms under MSYS2, so the exit hook runs it only when
+# scratch files exist. `trap -p` prints the user's EXIT trap as a quoted
+# command, which the hook runs after its own cleanup.
+# Re-sourcing finds skell's own trap installed and keeps the chained one.
+_skell_line=
+trap -p EXIT >| "$_skell_scratch"
+IFS= read -r -d '' _skell_line < "$_skell_scratch"
+: >| "$_skell_scratch"
+_skell_line=${_skell_line%$'\n'}
+case $_skell_line in
+  "trap -- '_skell_exit' EXIT") ;;
+  "trap -- "*" EXIT")
+    _skell_line=${_skell_line#trap -- }
+    eval "_skell_exit_trap=${_skell_line% EXIT}"
+    ;;
+  *) _skell_exit_trap= ;;
+esac
+unset _skell_line
+
+# The chained trap runs in _skell_exit's scope, so that function declares no
+# locals the trap could see in place of its own globals.
+_skell_exit() {
+  _skell_exit_code=$?
+  _skell_remove_scratch
+  [ -n "${_skell_exit_trap-}" ] || return "$_skell_exit_code"
+  _skell_status "$_skell_exit_code"
+  eval "$_skell_exit_trap"
+}
+_skell_remove_scratch() {
+  local file
+  local -a stale=()
+  for file in "$_skell_scratch" "$_skell_rank" "$_skell_rank_raw" \
+    "${_skell_complete_rec-}" "${_skell_complete_candidates-}"; do
+    [ -n "$file" ] && [ -e "$file" ] && stale+=("$file")
+  done
+  [ "${#stale[@]}" -gt 0 ] && command rm -f -- "${stale[@]}"
+}
+_skell_status() { return "$1"; }
+trap _skell_exit EXIT
 
 _skell_escape() {
   local s=${1//\\/\\\\}
@@ -100,11 +175,11 @@ _skell_record() {
   _skell_histnum=$HISTCMD
 
   local HISTTIMEFORMAT whole num cmd dir _skell_reply
-  history 1 > "$_skell_scratch" || return "$code"
+  history 1 >| "$_skell_scratch" || return "$code"
   # A multiline history entry spans several lines. Read to EOF.
   # `read -d ''` returns non-zero at EOF after assigning the value.
   IFS= read -r -d '' whole < "$_skell_scratch"
-  : > "$_skell_scratch"
+  : >| "$_skell_scratch"
   whole=${whole%$'\n'}
   whole=${whole#"${whole%%[![:space:]]*}"}
   num=${whole%%[![:digit:]]*}
@@ -155,15 +230,24 @@ _skell_unescape() {
 }
 
 _skell_history_widget() {
+  # A `bind -x` handler cannot call a readline command. Hand Ctrl+R back to
+  # readline and replay it through the terminal's DSR reply.
+  if ! _skell_ready; then
+    bind -m emacs-standard '"\C-r": reverse-search-history'
+    bind -m vi-insert '"\C-r": reverse-search-history'
+    bind '"\e[0n": reverse-search-history' 2>/dev/null
+    printf '\e[5n'
+    return 0
+  fi
   [ -s "$SKELL_HISTORY" ] || return 0
-  (umask 077; : > "$_skell_rank"; : > "$_skell_rank_raw")
+  _skell_empty "$_skell_rank" "$_skell_rank_raw"
   if ! gawk -f "$SKELL_ROOT/share/codec.awk" -f "$SKELL_ROOT/share/rank.awk" \
     -v "out=$_skell_rank" -v "raw=$_skell_rank_raw" "$SKELL_HISTORY"; then
-    command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+    _skell_empty "$_skell_rank" "$_skell_rank_raw"
     return 0
   fi
   if [ ! -s "$_skell_rank" ]; then
-    command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+    _skell_empty "$_skell_rank" "$_skell_rank_raw"
     return 0
   fi
 
@@ -180,7 +264,7 @@ _skell_history_widget() {
   case $chosen in
     *$'\n'*) ;;
     *)
-      command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+      _skell_empty "$_skell_rank" "$_skell_rank_raw"
       return 0
       ;;
   esac
@@ -190,7 +274,7 @@ _skell_history_widget() {
   id=${record%%$'\t'*}
   encoded=$(gawk -f "$SKELL_ROOT/share/select-history.awk" -v "n=$id" "$_skell_rank_raw")
   select_code=$?
-  command rm -f -- "$_skell_rank" "$_skell_rank_raw"
+  _skell_empty "$_skell_rank" "$_skell_rank_raw"
   [ "$select_code" -eq 0 ] || return 0
   _skell_unescape "$encoded"
   READLINE_LINE=$_skell_reply
@@ -206,3 +290,5 @@ _skell_history_widget() {
 
 bind -m emacs-standard -x '"\C-r": _skell_history_widget' 2>/dev/null
 bind -m vi-insert -x '"\C-r": _skell_history_widget' 2>/dev/null
+
+[ "${SKELL_COMPLETE-}" = off ] || . "$SKELL_ROOT/bash/completion.bash"

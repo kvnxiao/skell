@@ -4,6 +4,11 @@
 
 set -uo pipefail
 
+if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+  printf 'run-all: bash %s is older than 5.1; put bash 5.1 or newer first on PATH\n' "$BASH_VERSION" >&2
+  exit 1
+fi
+
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname -- "$here")
 
@@ -46,6 +51,7 @@ need fish 'plugin-fish' && run plugin-fish bash "$here/plugin-fish.sh"
 need fish 'path-fish'   && run path-fish   bash "$here/path-fish.sh"
 need gawk 'record'      && run record      bash "$here/record.sh"
 run initialize bash "$here/initialize.sh"
+run complete-bash bash "$here/complete-bash.sh"
 need gawk 'render'      && run render      bash "$here/render.sh"
 need gawk 'migrate'     && run migrate     bash "$here/migrate.sh"
 need gawk 'permissions' && run permissions bash "$here/permissions.sh"

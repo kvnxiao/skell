@@ -25,7 +25,10 @@ $1 != n { next }
     print skell_visible(text)
     exit
   }
-  q = shquote($2)
+  # Native Windows gawk runs pipes through cmd.exe, which cannot parse sh
+  # syntax. A Windows path cannot contain a double quote.
+  mingw = PROCINFO["platform"] == "mingw"
+  q = mingw ? "\"" $2 "\"" : shquote($2)
   args["eza"] = " -1 --color=never --no-quotes -- " q
   args["lsd"] = " -1 --color=never -- " q
   args["ls"] = " -1 -- " q
@@ -36,6 +39,8 @@ $1 != n { next }
     exit
   }
   if (lister != "") cmd = lister args[lister]
+  else if (mingw) cmd = "(where /q eza && eza" args["eza"] ")" \
+                        " || (where /q lsd && lsd" args["lsd"] ") || dir /b " q
   else cmd = "if command -v eza >/dev/null 2>&1; then eza" args["eza"] \
              "; elif command -v lsd >/dev/null 2>&1; then lsd" args["lsd"] \
              "; else ls" args["ls"] "; fi"

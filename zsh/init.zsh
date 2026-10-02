@@ -43,6 +43,38 @@ _skell_exit() {
 }
 add-zsh-hook zshexit _skell_exit
 
+# Truncate scratch files instead of spawning rm; the exit hook deletes them. A
+# truncated file keeps its mode, so only the first creation needs a subshell
+# for the private umask.
+_skell_scratch() {
+  local file
+  for file; do
+    if [[ -e $file ]]; then
+      : >| $file
+    else
+      (umask 077; : >| $file)
+    fi
+  done
+}
+
+# Check once per session that sk and gawk are on PATH.
+_skell_ready() {
+  if (( ! $+_skell_ready_state )); then
+    typeset -gi _skell_ready_state=1
+    local -a missing=()
+    local tool
+    for tool in sk gawk; do
+      (( $+commands[$tool] )) || missing+=($tool)
+    done
+    if (( $#missing )); then
+      _skell_ready_state=0
+      zle -I
+      print -ru2 -- "skell: requires ${(j: and :)missing} on PATH; Ctrl+R and Tab use zsh defaults"
+    fi
+  fi
+  (( _skell_ready_state ))
+}
+
 _skell_escape() {
   local s=${1//\\/\\\\}
   s=${s//$'\n'/\\n}
@@ -136,18 +168,22 @@ _skell_unescape() {
 }
 
 _skell_history_widget() {
+  if ! _skell_ready; then
+    zle history-incremental-search-backward
+    return
+  fi
   if [[ ! -s $SKELL_HISTORY ]]; then
     zle reset-prompt
     return 0
   fi
-  (umask 077; : > $_skell_rank; : > $_skell_rank_raw)
+  _skell_scratch $_skell_rank $_skell_rank_raw
   if ! gawk -f $SKELL_ROOT/share/codec.awk -f $SKELL_ROOT/share/rank.awk \
     -v out=$_skell_rank -v raw=$_skell_rank_raw $SKELL_HISTORY; then
-    command rm -f -- $_skell_rank $_skell_rank_raw
+    _skell_scratch $_skell_rank $_skell_rank_raw
     return 0
   fi
   if [[ ! -s $_skell_rank ]]; then
-    command rm -f -- $_skell_rank $_skell_rank_raw
+    _skell_scratch $_skell_rank $_skell_rank_raw
     return 0
   fi
 
@@ -164,7 +200,7 @@ _skell_history_widget() {
     --bind 'enter:accept(edit),alt-enter:accept(run)' < $_skell_rank)}")
 
   if (( ${#chosen} < 2 )); then
-    command rm -f -- $_skell_rank $_skell_rank_raw
+    _skell_scratch $_skell_rank $_skell_rank_raw
     zle reset-prompt
     return 0
   fi
@@ -173,7 +209,7 @@ _skell_history_widget() {
   encoded=$(gawk -f $SKELL_ROOT/share/select-history.awk \
     -v n=$id $_skell_rank_raw)
   local -i select_status=$?
-  command rm -f -- $_skell_rank $_skell_rank_raw
+  _skell_scratch $_skell_rank $_skell_rank_raw
   (( select_status == 0 )) || return 0
   _skell_unescape "$encoded"
   BUFFER=$REPLY

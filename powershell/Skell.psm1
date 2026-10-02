@@ -283,28 +283,63 @@ if (-not $script:SkellHooked) {
     }.GetNewClosure()
 }
 
-# Windows PowerShell uses the native PATH, which excludes MSYS2's and Git for
-# Windows' usr\bin. If SKELL_GAWK is set, use only that path; otherwise check
-# PATH, git's usr\bin, and C:\msys64\usr\bin in that order.
+# The MSYS2 installer records its directory under an uninstall key named by a
+# GUID. Scoop, Chocolatey, and archive installs record none.
+function Get-SkellMsysRoot {
+    foreach ($hive in [Microsoft.Win32.Registry]::CurrentUser, [Microsoft.Win32.Registry]::LocalMachine) {
+        $uninstall = $hive.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Uninstall')
+        if (-not $uninstall) { continue }
+        try {
+            foreach ($name in $uninstall.GetSubKeyNames()) {
+                # A subkey that denies read throws instead of returning null.
+                try { $key = $uninstall.OpenSubKey($name) } catch { continue }
+                if (-not $key) { continue }
+                try {
+                    if ([string]$key.GetValue('Publisher') -eq 'The MSYS2 Developers') {
+                        $location = [string]$key.GetValue('InstallLocation')
+                        if ($location) { return $location }
+                    }
+                } finally { $key.Dispose() }
+            }
+        } finally { $uninstall.Dispose() }
+    }
+    return 'C:\msys64'
+}
+
+# A git on PATH may be a shim outside the installation, so read the installer's
+# key first.
+function Get-SkellGitRoot {
+    foreach ($hive in [Microsoft.Win32.Registry]::LocalMachine, [Microsoft.Win32.Registry]::CurrentUser) {
+        $key = $hive.OpenSubKey('Software\GitForWindows')
+        if (-not $key) { continue }
+        try {
+            $location = [string]$key.GetValue('InstallPath')
+            if ($location) { return $location }
+        } finally { $key.Dispose() }
+    }
+    $git = @(Get-Command git -CommandType Application -ErrorAction Ignore)[0]
+    if ($git) { return Split-Path -Parent (Split-Path -Parent $git.Source) }
+    return $null
+}
+
+# If SKELL_GAWK is set, use only that path. On Windows, use MSYS2's gawk, then
+# Git for Windows', and skip PATH: a native Windows gawk runs pipes through
+# cmd.exe, which expands %NAME% and passes paths in the ANSI code page.
 function Get-SkellGawkPath {
     if ($env:SKELL_GAWK) {
         if ([System.IO.File]::Exists($env:SKELL_GAWK)) { return $env:SKELL_GAWK }
         return $null
     }
-    # Select the first PATH match because the caller invokes the returned path
-    # directly.
-    $onPath = @(Get-Command gawk -CommandType Application -ErrorAction Ignore)[0]
-    if ($onPath) { return $onPath.Source }
-    if (-not $IsWindows) { return $null }
-
-    $candidates = @()
-    $git = @(Get-Command git -CommandType Application -ErrorAction Ignore)[0]
-    if ($git) {
-        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
-        $candidates += Join-Path -Path $gitRoot -ChildPath 'usr' -AdditionalChildPath 'bin', 'gawk.exe'
+    if (-not $IsWindows) {
+        # Select the first PATH match because the caller invokes the returned
+        # path directly.
+        $onPath = @(Get-Command gawk -CommandType Application -ErrorAction Ignore)[0]
+        if ($onPath) { return $onPath.Source }
+        return $null
     }
-    $candidates += 'C:\msys64\usr\bin\gawk.exe'
-    foreach ($candidate in $candidates) {
+    foreach ($root in @(Get-SkellMsysRoot) + @(Get-SkellGitRoot)) {
+        if (-not $root) { continue }
+        $candidate = Join-Path -Path $root -ChildPath 'usr' -AdditionalChildPath 'bin', 'gawk.exe'
         if ([System.IO.File]::Exists($candidate)) { return $candidate }
     }
     return $null
@@ -335,6 +370,218 @@ function Invoke-SkellSearch([string]$SkPath, [string[]]$SkArgs, [string[]]$Lines
     return @(($reading.GetAwaiter().GetResult() -split "\r?\n") | Where-Object { $_.Length -gt 0 })
 }
 
+# Check once per session that sk and gawk exist, and keep their paths.
+function Test-SkellReady {
+    if ($null -eq $script:SkellReady) {
+        $script:SkellGawk = Get-SkellGawkPath
+        $script:SkellSk = @(Get-Command sk -CommandType Application -ErrorAction Ignore)[0]
+        $missing = @()
+        if (-not $script:SkellSk) { $missing += 'sk on PATH' }
+        if (-not $script:SkellGawk) {
+            $missing += if ($IsWindows) { 'gawk from MSYS2 or Git for Windows (or SKELL_GAWK)' } else { 'gawk on PATH (or SKELL_GAWK)' }
+        }
+        $script:SkellReady = $missing.Count -eq 0
+        # Key handlers call this check; print below the input and redraw it.
+        if (-not $script:SkellReady) {
+            [Console]::Out.WriteLine()
+            Write-Warning "skell: requires $($missing -join ' and '); Ctrl+R and Tab use PSReadLine defaults"
+            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+        }
+    }
+    return $script:SkellReady
+}
+
+# Render C0 and C1 controls as <0xNN>; completion tooltips can contain terminal
+# controls that skim would interpret.
+function ConvertTo-SkellVisible([string]$Text) {
+    if ($Text -notmatch '[\x00-\x1f\x7f-\x9f]') { return $Text }
+    $out = [System.Text.StringBuilder]::new($Text.Length)
+    foreach ($c in $Text.ToCharArray()) {
+        $n = [int]$c
+        if ($n -lt 0x20 -or ($n -ge 0x7f -and $n -le 0x9f)) {
+            $null = $out.Append(('<0x{0:X2}>' -f $n))
+        } else {
+            $null = $out.Append($c)
+        }
+    }
+    return $out.ToString()
+}
+
+# Show a tooltip unless it only repeats the match or the path behind it.
+function Get-SkellCompletionDescription($Match) {
+    $tip = ([string]$Match.ToolTip -replace '\s*\r?\n\s*', ' ').Trim()
+    if (-not $tip -or $tip -eq $Match.ListItemText -or $tip -eq $Match.CompletionText) { return '' }
+    $type = [string]$Match.ResultType
+    if ($type -eq 'ProviderItem' -or $type -eq 'ProviderContainer') { return '' }
+    if ($type -eq 'Command' -and [System.IO.Path]::IsPathRooted($tip)) { return '' }
+    return ConvertTo-SkellVisible $tip
+}
+
+# Print the longest prefix the texts share, ignoring case as PSReadLine does.
+function Get-SkellCommonPrefix([string[]]$Texts) {
+    $prefix = $Texts[0]
+    foreach ($text in $Texts) {
+        $n = [Math]::Min($prefix.Length, $text.Length)
+        $i = 0
+        while ($i -lt $n -and [char]::ToLowerInvariant($prefix[$i]) -eq [char]::ToLowerInvariant($text[$i])) { $i++ }
+        $prefix = $prefix.Substring(0, $i)
+    }
+    return $prefix
+}
+
+# Append the directory separator PSReadLine adds to a single container match,
+# inside a closing quote.
+function Add-SkellSeparator($Match) {
+    $text = $Match.CompletionText
+    if ([string]$Match.ResultType -ne 'ProviderContainer') { return $text }
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    if ($text.Length -ge 2 -and ($text[-1] -eq "'" -or $text[-1] -eq '"') -and $text[0] -eq $text[-1]) {
+        if ($text[-2] -ne $sep) { return $text.Substring(0, $text.Length - 1) + $sep + $text[-1] }
+        return $text
+    }
+    if ($text.EndsWith($sep)) { return $text }
+    return "$text$sep"
+}
+
+# A PowerShell command binds space-separated values to separate positional
+# parameters, so its argument values join with commas into one array. Parameter
+# names, command names, and native executables' arguments join with spaces.
+function Join-SkellCompletion($Picked, [string]$Line, [int]$Start) {
+    $texts = @($Picked | ForEach-Object CompletionText)
+    if ($texts.Count -eq 1) { return Add-SkellSeparator $Picked[0] }
+    $separator = ' '
+    $spaced = @($Picked | Where-Object { [string]$_.ResultType -in 'ParameterName', 'Command', 'Keyword' })
+    if ($spaced.Count -eq 0) {
+        # A command's extent excludes trailing whitespace, so an empty argument
+        # after a space starts past the end of its command.
+        $end = $Line.Substring(0, $Start).TrimEnd().Length
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($Line, [ref]$null, [ref]$null)
+        $command = $ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.Extent.StartOffset -le $Start -and $node.Extent.EndOffset -ge $end
+            }, $true) | Select-Object -Last 1
+        $name = if ($command -and $command.CommandElements[0].Extent.EndOffset -lt $Start) { $command.GetCommandName() }
+        if ($name) {
+            $info = @(Get-Command -Name $name -ErrorAction Ignore)[0]
+            if ($info -and $info.CommandType -eq 'Alias') { $info = $info.ResolvedCommand }
+            if ($info -and $info.CommandType -in 'Cmdlet', 'Function', 'Filter', 'ExternalScript') {
+                $separator = ','
+            }
+        }
+    }
+    return $texts -join $separator
+}
+
+# Leave the cursor before a closing quote that follows an added directory
+# separator, as PSReadLine does.
+function Write-SkellCompletion([int]$Start, [int]$Length, [string]$Text, $Match) {
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace($Start, $Length, $Text)
+    if ($Match -and $Text -ne $Match.CompletionText -and ($Text[-1] -eq "'" -or $Text[-1] -eq '"')) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($Start + $Text.Length - 1)
+    }
+}
+
+function Get-SkellCompletePath {
+    return Join-Path -Path $env:SKELL_DATA_DIR -ChildPath "complete-pwsh-$PID.tsv"
+}
+
+function Invoke-SkellPriorKey($Prior, [string]$Default, $Key, $Arg) {
+    $name = if ($Prior -and $Prior.Function) { $Prior.Function } else { $Default }
+    [Microsoft.PowerShell.PSConsoleReadLine]::$name($Key, $Arg)
+}
+
+# The menu runs only TabExpansion2 in-process before skim starts. The preview
+# receives a row ID and reads the row's fields from the record file.
+function Invoke-SkellComplete($Key, $Arg) {
+    if ($env:SKELL_COMPLETE -eq 'off' -or -not (Test-SkellReady)) {
+        Invoke-SkellPriorKey -Prior $script:SkellPriorTab -Default 'Complete' -Key $Key -Arg $Arg
+        return
+    }
+    $line = $null
+    $cursor = $null
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+    $result = $null
+    try { $result = TabExpansion2 -inputScript $line -cursorColumn $cursor } catch { $result = $null }
+    if (-not $result -or $result.CompletionMatches.Count -eq 0 -or $result.ReplacementIndex -lt 0) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
+        return
+    }
+    $found = @($result.CompletionMatches)
+    $start = $result.ReplacementIndex
+    $length = $result.ReplacementLength
+    $typed = $line.Substring($start, $length)
+
+    if ($found.Count -eq 1) {
+        Write-SkellCompletion -Start $start -Length $length -Text (Add-SkellSeparator $found[0]) -Match $found[0]
+        return
+    }
+    $prefix = Get-SkellCommonPrefix @($found | ForEach-Object CompletionText)
+    if ($prefix.Length -gt $typed.Length -and
+        $prefix.StartsWith($typed, [System.StringComparison]::OrdinalIgnoreCase)) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::Replace($start, $length, $prefix)
+        return
+    }
+
+    $width = [Math]::Min(40, ($found | ForEach-Object { $_.ListItemText.Length } | Measure-Object -Maximum).Maximum)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $records = [System.Collections.Generic.List[string]]::new()
+    $hasDir = $false
+    $hasDesc = $false
+    for ($i = 0; $i -lt $found.Count; $i++) {
+        $match = $found[$i]
+        $label = ConvertTo-SkellVisible $match.ListItemText
+        $desc = Get-SkellCompletionDescription $match
+        if ($desc) { $hasDesc = $true }
+        $path = ''
+        $tip = [string]$match.ToolTip
+        if ([string]$match.ResultType -eq 'ProviderContainer' -and $tip -notmatch '[\t\n\r]' -and
+            [System.IO.Path]::IsPathRooted($tip) -and [System.IO.Directory]::Exists($tip)) {
+            $path = $tip.Replace('\', '/')
+            $hasDir = $true
+        }
+        $shown = if ($desc) { "`e[2m$desc`e[0m" } else { '' }
+        $lines.Add("$($i + 1)`t$($label.PadRight($width))`t$shown")
+        $records.Add("$($i + 1)`t$path`t$label`t$desc")
+    }
+    $show = switch ($env:SKELL_COMPLETE_PREVIEW) {
+        'off' { $false }
+        'directory' { $hasDir }
+        default { $hasDir -or $hasDesc }
+    }
+
+    $priorEncoding = [Console]::OutputEncoding
+    $rec = Get-SkellCompletePath
+    try {
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+        $height = [Math]::Min($found.Count + 4, [Math]::Max(6, [Math]::Floor([Console]::WindowHeight * 2 / 3)))
+        $skArgs = @(
+            '--height', "$height", '--min-height', "$height", '--layout=reverse', '--border', 'rounded',
+            '--info', 'inline', '--prompt', '> ', '--ansi', '--tabstop', '1', '--multi', '--cycle',
+            '--delimiter', "`t", '--with-nth', '2..', '--nth', '1',
+            '--tiebreak', 'score,begin,index',
+            '--bind', 'tab:down,btab:up,ctrl-space:toggle')
+        if ($show) {
+            # LF endings: a POSIX gawk would keep a CR on the last field.
+            [System.IO.File]::WriteAllText($rec, ($records -join "`n") + "`n")
+            $awkDir = (Join-Path -Path $env:SKELL_ROOT -ChildPath 'share').Replace('\', '/')
+            $gawkName = [System.IO.Path]::GetFileName($script:SkellGawk)
+            $skArgs += '--preview', "$gawkName -f `"$awkDir/codec.awk`" -f `"$awkDir/preview-complete.awk`" -v n={1} `"$($rec.Replace('\', '/'))`"",
+            '--preview-window', 'right:50%:wrap'
+        }
+        $chosen = Invoke-SkellSearch -SkPath $script:SkellSk.Source -SkArgs $skArgs -Lines $lines `
+            -GawkDir (Split-Path -Parent $script:SkellGawk)
+        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+        if ($chosen.Count -eq 0) { return }
+        $picked = @($chosen | ForEach-Object { $found[[int]$_.Split("`t", 2)[0] - 1] })
+        $single = if ($picked.Count -eq 1) { $picked[0] }
+        Write-SkellCompletion -Start $start -Length $length -Text (Join-SkellCompletion -Picked $picked -Line $line -Start $start) -Match $single
+    } finally {
+        Remove-Item -LiteralPath $rec -Force -ErrorAction Ignore
+        [Console]::OutputEncoding = $priorEncoding
+    }
+}
+
 # Pass the ranked-file paths with gawk variables; PowerShell redirection would
 # decode gawk's stdout and re-encode non-ASCII command text. The preview runs
 # gawk directly instead of starting a nested pwsh process.
@@ -355,18 +602,12 @@ if ($setKeyHandlerCommand -and $getKeyHandlerCommand -and
         $rawRank = $null
         try {
             [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-            $gawk = Get-SkellGawkPath
-            if (-not $gawk) {
-                Write-Warning 'skell: history search found no gawk; install one or set SKELL_GAWK to its path'
-                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+            if (-not (Test-SkellReady)) {
+                Invoke-SkellPriorKey -Prior $script:SkellPriorCtrlRHandler -Default 'ReverseSearchHistory' -Key $null -Arg $null
                 return
             }
-            $sk = @(Get-Command sk -CommandType Application -ErrorAction Ignore)[0]
-            if (-not $sk) {
-                Write-Warning 'skell: history search needs sk on PATH'
-                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-                return
-            }
+            $gawk = $script:SkellGawk
+            $sk = $script:SkellSk
 
             $line = $null
             $cursor = $null
@@ -444,6 +685,38 @@ if ($setKeyHandlerCommand -and $getKeyHandlerCommand -and
     $script:SkellOwnsCtrlR = $true
 }
 
+# Tab opens the skim menu and Shift+Tab opens PSReadLine's own menu. A custom
+# handler the user bound to either chord stays in place.
+$script:SkellOwnsTab = $false
+$script:SkellOwnsShiftTab = $false
+if ($setKeyHandlerCommand -and $getKeyHandlerCommand) {
+    $script:SkellPriorTab = @(Get-PSReadLineKeyHandler -Chord 'Tab' -ErrorAction Ignore)[0]
+    if (-not $script:SkellPriorTab -or $script:SkellPriorTab.Group -ne 'Custom') {
+        Set-PSReadLineKeyHandler -Chord 'Tab' -BriefDescription 'Complete with skell' -ScriptBlock {
+            param($key, $arg)
+            Invoke-SkellComplete $key $arg
+        }
+        $script:SkellOwnsTab = $true
+    }
+    $script:SkellPriorShiftTab = @(Get-PSReadLineKeyHandler -Chord 'Shift+Tab' -ErrorAction Ignore)[0]
+    if (-not $script:SkellPriorShiftTab -or
+        ($script:SkellPriorShiftTab.Group -ne 'Custom' -and $script:SkellPriorShiftTab.Function -ne 'MenuComplete')) {
+        Set-PSReadLineKeyHandler -Chord 'Shift+Tab' -Function MenuComplete
+        $script:SkellOwnsShiftTab = $true
+    }
+}
+
+# Put back a chord's prior binding unless a later binding replaced skell's.
+function Restore-SkellKey([string]$Chord, $Prior, [string]$Owned) {
+    $current = @(Get-PSReadLineKeyHandler -Chord $Chord -ErrorAction Ignore)[0]
+    if (-not $current -or $current.Function -ne $Owned) { return }
+    if ($Prior) {
+        Set-PSReadLineKeyHandler -Chord $Chord -Function $Prior.Function
+    } elseif (Get-Command Remove-PSReadLineKeyHandler -ErrorAction Ignore) {
+        Remove-PSReadLineKeyHandler -Chord $Chord
+    }
+}
+
 # Remove-Module leaves the wrapped prompt and the history handler pointing at a
 # module that is gone, so both are put back as they were found.
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
@@ -455,19 +728,14 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
     if (Get-Command Set-PSReadLineOption -ErrorAction Ignore) {
         Set-PSReadLineOption -AddToHistoryHandler $script:SkellPriorHistoryHandler
     }
-    if ($script:SkellOwnsCtrlR -and
-        (Get-Command Get-PSReadLineKeyHandler -ErrorAction Ignore)) {
-        $currentCtrlR = @(Get-PSReadLineKeyHandler -Chord 'Ctrl+r' -ErrorAction Ignore)[0]
-        if ($currentCtrlR -and $currentCtrlR.Function -eq 'Search skell history') {
-            if ($script:SkellPriorCtrlRHandler) {
-                Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -Function $script:SkellPriorCtrlRHandler.Function
-            } elseif (Get-Command Remove-PSReadLineKeyHandler -ErrorAction Ignore) {
-                Remove-PSReadLineKeyHandler -Chord 'Ctrl+r'
-            }
-        }
+    if (Get-Command Get-PSReadLineKeyHandler -ErrorAction Ignore) {
+        if ($script:SkellOwnsCtrlR) { Restore-SkellKey -Chord 'Ctrl+r' -Prior $script:SkellPriorCtrlRHandler -Owned 'Search skell history' }
+        if ($script:SkellOwnsTab) { Restore-SkellKey -Chord 'Tab' -Prior $script:SkellPriorTab -Owned 'Complete with skell' }
+        if ($script:SkellOwnsShiftTab) { Restore-SkellKey -Chord 'Shift+Tab' -Prior $script:SkellPriorShiftTab -Owned 'MenuComplete' }
     }
     Remove-Item -LiteralPath (Get-SkellRankPath) -Force -ErrorAction Ignore
     Remove-Item -LiteralPath (Get-SkellRawRankPath) -Force -ErrorAction Ignore
+    Remove-Item -LiteralPath (Get-SkellCompletePath) -Force -ErrorAction Ignore
 }
 
 Export-ModuleMember -Function Convert-SkellEscape, Get-SkellEscapedField,

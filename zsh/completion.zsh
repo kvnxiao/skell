@@ -75,7 +75,12 @@ _skell_compadd() {
   local -i i
   for (( i = 1; i <= $#__hits; i++ )); do
     w=$__hits[i] d=$__dscr[i]
-    [[ -n $d ]] || d=$w
+    if [[ -n $d && $d != $w ]]; then
+      _skell_hasdsc+=1
+    else
+      _skell_hasdsc+=0
+      d=$w
+    fi
     # Replace tabs and newlines that would break the TSV row.
     d=${d//[$'\n\t']/ }
     _skell_words+=$w
@@ -90,6 +95,11 @@ _skell_compadd() {
 }
 
 _skell_complete() {
+  # Shift+Tab and fallbacks run the original widget with the capture off.
+  if (( ! _skell_comp_active )); then
+    _skell_main_complete "$@"
+    return
+  fi
   local -aU _skell_groups
   local -i ret=0
 
@@ -109,6 +119,7 @@ _skell_complete() {
 
   local -a ids=() disp=() dirs=()
   local -A seen=()
+  local -i anydsc=0
   local d p key
   for (( i = 1; i <= n; i++ )); do
     (( same && i > 1 )) && break
@@ -128,6 +139,7 @@ _skell_complete() {
     key=$_skell_grps[i]$'\0'$d
     (( $+seen[$key] )) && continue
     seen[$key]=1
+    (( _skell_hasdsc[i] )) && anydsc=1
     ids+=$i
     disp+=$d
     dirs+=$p
@@ -158,7 +170,7 @@ _skell_complete() {
   return $ret
 }
 
-# ids, disp, dirs, and the capture arrays are dynamically scoped from
+# ids, disp, dirs, anydsc, and the capture arrays are dynamically scoped from
 # _skell_complete. The preview receives only a candidate index and reads the
 # remaining fields from the record file.
 _skell_menu() {
@@ -172,11 +184,11 @@ _skell_menu() {
     (( gw++ ))
   fi
 
-  # The record may contain filesystem paths. Create it under a private umask;
-  # the exit hook in zsh/init.zsh removes both files.
+  # The record may contain filesystem paths. _skell_scratch creates it under a
+  # private umask; the exit hook in zsh/init.zsh removes both files.
   local rec=$_skell_complete_rec
   local candidates=$_skell_complete_candidates
-  (umask 077; : > $rec; : > $candidates)
+  _skell_scratch $rec $candidates
   local -a lines=()
   local -i hasdir=0
   for (( i = 1; i <= $#ids; i++ )); do
@@ -199,10 +211,10 @@ _skell_menu() {
     fi
     lines+=("$ids[i]"$'\t'"$p"$'\t'"$g"$'\t'"$disp[i]")
   done
-  if ! print -rl -- $lines > $rec \
+  if ! print -rl -- $lines >| $rec \
     || ! gawk -f $SKELL_ROOT/share/codec.awk \
-      -f $SKELL_ROOT/share/completion-candidates.awk $rec > $candidates; then
-    command rm -f -- $rec $candidates
+      -f $SKELL_ROOT/share/completion-candidates.awk $rec >| $candidates; then
+    _skell_scratch $rec $candidates
     return 1
   fi
 
@@ -216,7 +228,13 @@ _skell_menu() {
     with='3..'
     nth=(--nth 2)
   fi
-  if (( hasdir )); then
+  local -i show=0
+  case $SKELL_COMPLETE_PREVIEW in
+    off) ;;
+    directory) show=$hasdir ;;
+    *) (( hasdir || anydsc )) && show=1 ;;
+  esac
+  if (( show )); then
     prev=(--preview "gawk -f \"$SKELL_ROOT/share/codec.awk\" -f \"$SKELL_ROOT/share/preview-complete.awk\" -v n={1} \"$rec\""
           --preview-window 'right:50%:wrap')
   fi
@@ -230,7 +248,7 @@ _skell_menu() {
     --tiebreak score,begin,index \
     --bind 'tab:down,btab:up,ctrl-space:toggle' \
     $prev < $candidates)}")
-  command rm -f -- $rec $candidates
+  _skell_scratch $rec $candidates
 
   [[ -n $chosen[1] ]] || return 1
 
@@ -262,8 +280,12 @@ _skell_complete_apply() {
 }
 
 _skell_complete_widget() {
+  if [[ $SKELL_COMPLETE == off ]] || ! _skell_ready; then
+    zle .skell-orig-$_skell_orig_widget
+    return
+  fi
   local -a _skell_words=() _skell_dscrs=() _skell_ctxs=() _skell_dirs=() \
-           _skell_isfile=() _skell_grps=() _skell_chosen=()
+           _skell_isfile=() _skell_grps=() _skell_hasdsc=() _skell_chosen=()
   local -i _skell_finish=0 ret=0
   local -i _skell_comp_active=1
 
@@ -310,6 +332,12 @@ _skell_complete_widget() {
   zstyle ':completion:*' list-grouped false
   bindkey -M emacs '^I' _skell_complete_widget
   bindkey -M viins '^I' _skell_complete_widget
+  # Shift+Tab runs zsh's own completion unless the user bound it already.
+  local keymap
+  for keymap in emacs viins; do
+    [[ $(builtin bindkey -M $keymap '^[[Z') == *undefined-key ]] \
+      && bindkey -M $keymap '^[[Z' .skell-orig-$_skell_orig_widget
+  done
 
   autoload +X -Uz _main_complete _approximate
 
