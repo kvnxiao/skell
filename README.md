@@ -5,8 +5,8 @@
 Skell binds `Ctrl+R` and `Tab` to skim, a fuzzy finder. `Ctrl+R` searches every
 command you have run, and `Tab` lists the shell's own completions in a
 filterable menu. Skell works the same way in bash, fish, PowerShell, and zsh on
-Windows, Linux, and macOS. Recording a command does not start a process, so Skell
-does not delay the prompt.
+Windows, Linux, and macOS. Recording a command does not start a process, so
+Skell does not delay the prompt.
 
 - **Shared history.** Every shell appends to one history file, so a command run
   in zsh is one `Ctrl+R` away in PowerShell. Each record stores the time, the
