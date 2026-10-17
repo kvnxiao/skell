@@ -13,8 +13,7 @@ end
 test -n "$SKELL_HISTORY"; or set -gx SKELL_HISTORY $SKELL_DATA_DIR/history.tsv
 
 # Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it.
-# Rewrite the path before opening the store. Match drive letters first:
-# converting costs ~3ms under MSYS2.
+# Rewrite the path before opening the store.
 if string match -qr '^[A-Za-z]:[\x5c/]' -- $SKELL_DATA_DIR $SKELL_HISTORY
     and test -e /usr/bin/msys-2.0.dll
     set -gx SKELL_DATA_DIR (_skell_msys_path $SKELL_DATA_DIR)
