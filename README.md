@@ -350,8 +350,10 @@ write, which can race another shell mid-command. They also open
 `FileShare.Read`, so a second writer throws.
 
 Fish can stat a drive-letter path such as `C:/...` but cannot redirect to it,
-so before opening the store, fish rewrites a drive-letter path to its mounted
-MSYS2 path. Bash and zsh append using their configured paths.
+so before opening the store, fish rewrites a drive-letter path to its MSYS2
+form: `C:/x` becomes `/c/x`. Like PowerShell's conversion of recorded
+directories, the rewrite assumes MSYS2's default of mounting each drive at the
+root (`/c`, `/d`). Bash and zsh append using their configured paths.
 
 ## Development
 

@@ -13,13 +13,7 @@ printf '%s' (_skell_msys_path $win_dir) >$SKELL_OUT_DIR/from-slash
 printf '%s' (_skell_msys_path (string replace -a / $bs -- $win_dir)) >$SKELL_OUT_DIR/from-backslash
 printf '%s' (_skell_msys_path $SKELL_SANDBOX_MSYS/data) >$SKELL_OUT_DIR/from-posix
 
-for letter in Z Y X W
-    if not test -d $letter:/
-        printf '%s' $letter:/nowhere >$SKELL_OUT_DIR/unmounted-want
-        printf '%s' (_skell_msys_path $letter:/nowhere) >$SKELL_OUT_DIR/unmounted
-        break
-    end
-end
+printf '%s' (_skell_msys_path Z:/nowhere) >$SKELL_OUT_DIR/drive-letter
 
 # Set the Windows paths before sourcing `fish/conf.d/skell.fish`; the file
 # rewrites them while sourcing.

@@ -45,11 +45,8 @@ skell_eq 'a backslash path rewrites the same way' "$slash" \
 skell_eq 'an MSYS2 path is preserved' "$SKELL_SANDBOX_MSYS/data" \
   "$(cat -- "$out/from-posix")"
 
-# If Z:, Y:, X:, and W: are mounted, the test has no unmounted drive to compare.
-if [ -f "$out/unmounted" ]; then
-  skell_eq 'an unmounted drive letter is preserved' \
-    "$(cat -- "$out/unmounted-want")" "$(cat -- "$out/unmounted")"
-fi
+skell_eq 'a drive letter maps to its lowercase cygdrive path' /z/nowhere \
+  "$(cat -- "$out/drive-letter")"
 
 skell_eq 'the hook rewrites the data directory' yes \
   "$(cat -- "$out/data-rewritten" 2>/dev/null)"
